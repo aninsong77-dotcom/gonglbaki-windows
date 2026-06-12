@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@layer base {
+  :root {
+    --background: 30 25% 97%; --foreground: 25 30% 12%;
+    --card: 0 0% 100%; --card-foreground: 25 30% 12%;
+    --popover: 0 0% 100%; --popover-foreground: 25 30% 12%;
+    --primary: 25 60% 35%; --primary-foreground: 30 25% 97%;
+    --primary-glow: 30 75% 55%;
+    --secondary: 30 20% 92%; --secondary-foreground: 25 30% 20%;
+    --muted: 30 15% 94%; --muted-foreground: 25 10% 45%;
+    --accent: 200 50% 45%; --accent-foreground: 0 0% 100%;
+    --counselor: 25 70% 45%; --counselor-bg: 30 60% 96%;
+    --client: 200 55% 42%; --client-bg: 200 50% 96%;
+    --silence: 0 0% 55%;
+    --destructive: 0 75% 55%; --destructive-foreground: 0 0% 100%;
+    --border: 30 15% 88%; --input: 30 15% 88%; --ring: 25 60% 35%;
+    --radius: 0.75rem;
+    --gradient-warm: linear-gradient(135deg, hsl(25 60% 35%), hsl(30 75% 55%));
+    --gradient-soft: linear-gradient(180deg, hsl(30 25% 97%), hsl(30 20% 93%));
+    --shadow-elegant: 0 10px 40px -15px hsl(25 60% 35% / 0.25);
+    --shadow-soft: 0 2px 12px -4px hsl(25 30% 12% / 0.08);
+  }
+  .dark {
+    --background: 25 20% 8%; --foreground: 30 20% 92%;
+    --card: 25 18% 11%; --card-foreground: 30 20% 92%;
+    --popover: 25 18% 11%; --popover-foreground: 30 20% 92%;
+    --primary: 30 75% 60%; --primary-foreground: 25 30% 12%;
+    --secondary: 25 15% 18%; --secondary-foreground: 30 20% 92%;
+    --muted: 25 15% 16%; --muted-foreground: 30 10% 65%;
+    --accent: 200 60% 55%; --accent-foreground: 25 30% 12%;
+    --counselor: 30 75% 60%; --counselor-bg: 25 30% 15%;
+    --client: 200 60% 60%; --client-bg: 200 30% 15%;
+    --silence: 0 0% 50%;
+    --destructive: 0 70% 50%; --destructive-foreground: 0 0% 100%;
+    --border: 25 15% 20%; --input: 25 15% 20%; --ring: 30 75% 60%;
+  }
+  * { @apply border-border; }
+  body { @apply bg-background text-foreground; font-feature-settings: "kern","liga"; }
+}

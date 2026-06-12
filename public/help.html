@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>곤글박이 — 문제 해결 안내</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', '맑은 고딕', sans-serif;
+    background: #f7f5f2;
+    color: #2d2d2d;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 820px; margin: 0 auto; padding: 2rem 1.5rem 5rem; }
+
+  /* 헤더 */
+  .header {
+    display: flex; align-items: center; gap: 14px;
+    padding-bottom: 1.25rem;
+    border-bottom: 1px solid #e5e0d8;
+    margin-bottom: 2rem;
+    justify-content: space-between;
+  }
+  .logo {
+    width: 40px; height: 40px; background: #3a6a4a;
+    border-radius: 10px; display: flex; align-items: center; justify-content: center;
+    font-size: 22px; flex-shrink: 0;
+  }
+  .header-title { font-size: 17px; font-weight: 700; color: #1a1a1a; }
+  .header-sub { font-size: 12px; color: #888; margin-top: 2px; }
+
+  /* 탭 */
+  .tab-bar {
+    display: flex; gap: 4px;
+    background: #ede9e3; border-radius: 10px; padding: 4px;
+    margin-bottom: 1.5rem;
+  }
+  .tab {
+    flex: 1; text-align: center; font-size: 13px; font-weight: 600;
+    padding: 8px 0; border-radius: 7px; cursor: pointer;
+    color: #888; background: transparent; border: none; transition: all 0.15s;
+  }
+  .tab.active { background: #fff; color: #1a1a1a; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+
+  /* 섹션 레이블 */
+  .section-label {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+    color: #aaa; text-transform: uppercase; margin: 1.75rem 0 0.6rem;
+  }
+
+  /* 카드 */
+  .card {
+    background: #fff; border: 1px solid #e5e0d8; border-radius: 12px;
+    margin-bottom: 0.6rem; overflow: hidden;
+  }
+  .card-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 13px 16px; cursor: pointer; user-select: none;
+    transition: background 0.12s;
+  }
+  .card-header:hover { background: #faf8f5; }
+  .badge {
+    font-size: 10px; font-weight: 700; padding: 3px 8px;
+    border-radius: 20px; white-space: nowrap; flex-shrink: 0;
+  }
+  .badge-red   { background: #fdeaea; color: #b03030; }
+  .badge-amber { background: #fef3e2; color: #9a5500; }
+  .badge-teal  { background: #e2f5ec; color: #1a7a4a; }
+  .card-title  { font-size: 13.5px; font-weight: 600; color: #1a1a1a; flex: 1; }
+  .chevron     { font-size: 12px; color: #bbb; transition: transform 0.2s; flex-shrink: 0; }
+  .chevron.open { transform: rotate(180deg); }
+
+  .card-body { display: none; padding: 0 16px 16px; border-top: 1px solid #f0ece6; }
+  .card-body.open { display: block; }
+
+  .symptom { font-size: 12px; color: #777; margin: 12px 0 8px; }
+  .symptom b { color: #333; }
+
+  /* 단계 목록 */
+  .step-list { list-style: none; counter-reset: s; }
+  .step-list li {
+    counter-increment: s;
+    margin-bottom: 8px; font-size: 13px; color: #333; line-height: 1.6;
+    padding-left: 30px; position: relative;
+  }
+  .step-list li::before {
+    content: counter(s);
+    position: absolute; left: 0; top: 2px;
+    width: 20px; height: 20px;
+    background: #f0ece6; border: 1px solid #ddd; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; color: #888;
+  }
+  .step-list li b { color: #1a1a1a; }
+  .step-list li em { color: #3a6a4a; font-style: normal; font-weight: 600; }
+
+  .code { font-family: 'Consolas', 'D2Coding', monospace; font-size: 12px;
+    background: #f0ece6; border-radius: 5px; padding: 2px 6px; color: #555; }
+
+  .tip {
+    background: #e2f5ec; border-radius: 8px;
+    padding: 8px 12px; font-size: 12px; color: #1a7a4a; margin-top: 10px;
+  }
+  .warn {
+    background: #fef3e2; border-radius: 8px;
+    padding: 8px 12px; font-size: 12px; color: #9a5500; margin-top: 10px;
+  }
+
+  /* 디버그 파일 안내 */
+  .debug-box {
+    background: #fff; border: 1.5px solid #c5d8cc; border-radius: 12px;
+    padding: 18px 20px; margin-top: 2rem;
+  }
+  .debug-box h3 { font-size: 13px; font-weight: 700; color: #2d1f0e; margin-bottom: 10px; }
+  .debug-box p  { font-size: 12.5px; color: #555; line-height: 1.7; margin-bottom: 8px; }
+  .debug-path {
+    font-family: 'Consolas', 'D2Coding', monospace; font-size: 12px;
+    background: #f0f7f2; border: 1px solid #c5d8cc; border-radius: 6px;
+    padding: 8px 12px; color: #2d5a3a; margin: 6px 0;
+  }
+  .debug-steps { list-style: none; margin-top: 10px; }
+  .debug-steps li {
+    font-size: 12.5px; color: #444; margin-bottom: 8px;
+    display: flex; align-items: flex-start; gap: 8px;
+  }
+  .debug-steps li .num {
+    color: #3a6a4a; font-weight: 700; flex-shrink: 0; min-width: 16px;
+  }
+
+  .footer-note { font-size: 11px; color: #aaa; text-align: center; margin-top: 3rem; }
+
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  .copy-debug-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: white; color: #374151;
+    border: 1px solid #e5e0d8; border-radius: 8px;
+    padding: 6px 12px; font-size: 12px; font-weight: 600;
+    cursor: pointer; font-family: inherit; white-space: nowrap;
+    transition: background 0.12s;
+  }
+  .copy-debug-btn:hover { background: #f0f7f2; border-color: #3a6a4a; color: #3a6a4a; }
+  .copy-debug-btn:active { transform: scale(0.97); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="header">
+    <div style="display:flex;align-items:center;gap:14px;">
+    <img src="data:image/png;base64,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" alt="곤글박이 로고" style="width:auto;height:48px;object-fit:contain;flex-shrink:0;mix-blend-mode:multiply;" />
+    <div>
+      <div class="header-title">곤글박이 — 문제 해결 안내</div>
+      <div class="header-sub">변환이 안 될 때 단계별로 확인해보세요</div>
+    </div>
+    </div>
+    <button class="copy-debug-btn" onclick="copyDebugLog()">
+      📋 디버그 로그 복사
+    </button>
+  </div>
+
+  <div class="tab-bar">
+    <button class="tab active" onclick="switchTab('general')">일반 PC 문제</button>
+    <button class="tab" onclick="switchTab('secure')">보안·기관 PC 문제</button>
+  </div>
+
+  <!-- ══════════════════════════════════════════ 일반 PC -->
+  <div id="panel-general" class="panel active">
+
+    <div class="section-label">변환이 안 될 때</div>
+
+    <div class="card">
+      <div class="card-header" onclick="toggle(this)">
+        <span class="badge badge-red">먼저 확인</span>
+        <span class="card-title">변환 버튼을 눌러도 아무 반응이 없어요</span>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="symptom"><b>증상:</b> 버튼을 눌렀는데 로딩도 없고 텍스트도 안 나옴</div>
+        <ul class="step-list">
+          <li>설정(⚙) → <b>변환 엔진</b>을 확인해주세요. <em>faster-whisper</em> 또는 <em>whisper.cpp</em> 중 하나여야 해요.</li>
+          <li>선택한 엔진의 <b>모델이 설치되어 있는지</b> 확인하세요. 설치 안 된 모델로는 시작이 안 돼요.</li>
+          <li>whisper.cpp 엔진이 선택되어 있다면 → <b>faster-whisper로 바꿔서</b> 다시 시도해보세요.</li>
+          <li>그래도 안 되면 앱을 완전히 종료 후 다시 실행해주세요.</li>
+        </ul>
+        <div class="tip">💡 설정을 바꾼 적 없는데 안 된다면 앱 재실행을 먼저 해보세요.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" onclick="toggle(this)">
+        <span class="badge badge-red">먼저 확인</span>
+        <span class="card-title">변환하다가 중간에 멈춰요</span>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="symptom"><b>증상:</b> 텍스트가 나오다가 멈추고 더 이상 진행 안 됨</div>
+        <ul class="step-list">
+          <li>화면에 <b>'이어서 변환' 버튼</b>이 나타나면 눌러주세요. 멈춘 지점부터 이어서 변환할 수 있어요.</li>
+          <li>파일이 1시간 이상이면 <b>30분 이하로 잘라서</b> 순서대로 변환해보세요.</li>
+          <li>RAM이 8GB 이하라면 설정에서 <b>Small 모델</b>로 바꿔서 시도해보세요.</li>
+          <li>크롬, 한글 등 다른 프로그램을 모두 닫고 다시 시도해보세요.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" onclick="toggle(this)">
+        <span class="badge badge-amber">확인 필요</span>
+        <span class="card-title">앱이 실행은 되는데 흰 화면만 나와요</span>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="symptom"><b>증상:</b> 앱 아이콘 클릭 후 창은 뜨는데 흰 화면이거나 멈춤</div>
+        <ul class="step-list">
+          <li>잠시 기다려보세요. 첫 실행 시 내부 서버 준비에 <b>10~30초</b> 걸릴 수 있어요.</li>
+          <li>30초 이상 흰 화면이면 앱을 완전히 종료하고 다시 실행하세요.</li>
+          <li>그래도 같으면 <b>작업 관리자</b>(Ctrl+Shift+Esc)에서 곤글박이 관련 프로세스를 모두 종료 후 다시 실행하세요.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-label">모델 · 다운로드 문제</div>
+
+    <div class="card">
+      <div class="card-header" onclick="toggle(this)">
+        <span class="badge badge-amber">확인 필요</span>
+        <span class="card-title">처음 실행할 때 AI 모델 다운로드가 안 돼요</span>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="symptom"><b>증상:</b> 첫 실행 시 다운로드 화면에서 멈추거나 오류</div>
+        <ul class="step-list">
+          <li><b>인터넷 연결</b>을 확인해주세요. 첫 실행 시 약 1.5GB 다운로드가 필요해요.</li>
+          <li>VPN이 켜져 있다면 <b>VPN을 끄고</b> 다시 시도해보세요.</li>
+          <li>C드라이브에 <b>3GB 이상 여유 공간</b>이 있는지 확인해주세요.</li>
+          <li>다운로드가 중간에 끊겼다면 앱을 재실행하면 이어서 다운로드돼요.</li>
+        </ul>
+        <div class="tip">💡 다운로드가 완료되면 이후엔 인터넷 없이 사용 가능해요.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" onclick="toggle(this)">
+        <span class="badge badge-amber">확인 필요</span>
+        <span class="card-title">변환 속도가 너무 느려요</span>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="symptom"><b>증상:</b> 변환은 되는데 실시간의 3배 이상 시간이 걸림</div>
+        <ul class="step-list">
+          <li>설정에서 모델을 <b>Small</b>로 바꿔보세요. Medium보다 2~3배 빨라요.</li>
+          <li>변환 중 다른 무거운 프로그램은 모두 종료해주세요.</li>
+          <li>파일을 <b>15~20분 단위로 나눠서</b> 변환하면 더 안정적이에요.</li>
+        </ul>
+        <div class="tip">💡 NVIDIA GPU가 있는 PC는 자동으로 GPU가 사용돼요. GPU 드라이버가 최신인지 확인해보세요.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════════════════════════════════════ 보안/기관 PC -->
+  <div id="panel-secure" class="panel">
+
+    <div class="section-label">회사 · 학교 지급 PC / 보안 프로그램이 강한 환경</div>
+
+    <div class="card">
+      <div class="card-header" onclick="toggle(this)">
+        <span class="badge badge-red">높은 가능성</span>
+        <span class="card-title">회사/학교 PC에서만 변환이 안 돼요</span>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="symptom"><b>증상:</b> 개인 PC에선 잘 되는데 기관 PC에서만 안 됨</div>
+        <ul class="step-list">
+          <li><b>백신·보안 프로그램</b>이 내부 실행파일을 차단하고 있을 수 있어요. 백신을 열어 <em>차단된 항목</em> 또는 <em>격리된 파일</em>을 확인해보세요.</li>
+          <li>백신에서 곤글박이 설치 폴더 전체를 <b>검사 예외(화이트리스트)</b>에 추가해보세요.</li>
+          <li>설정(⚙) → 엔진을 <b>faster-whisper</b>로 바꿔보세요. whisper.cpp보다 차단될 가능성이 낮아요.</li>
+          <li>그래도 안 되면 <b>IT 담당자에게</b> 실행 권한을 요청하거나 개인 노트북 사용을 권장드려요.</li>
+        </ul>
+        <div class="warn">⚠️ 기관 PC는 외부 실행파일 실행 자체가 정책으로 막혀 있는 경우가 있어요.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" onclick="toggle(this)">
+        <span class="badge badge-red">높은 가능성</span>
+        <span class="card-title">whisper.cpp 엔진으로 변환하면 아무 반응이 없어요</span>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="symptom"><b>증상:</b> whisper.cpp 엔진 선택 후 변환 시도 시 무반응</div>
+        <ul class="step-list">
+          <li>파일 탐색기에서 <span class="code">C:\whisper-models</span> 폴더가 있는지 확인해보세요.</li>
+          <li>없다면 직접 만들어보세요. <b>권한 오류</b>가 뜨면 C드라이브 쓰기 권한이 없는 것이에요.</li>
+          <li>이 경우 설정에서 <b>faster-whisper 엔진</b>으로 전환하면 해결돼요. faster-whisper는 이 경로를 사용하지 않아요.</li>
+        </ul>
+        <div class="tip">💡 faster-whisper 엔진은 C드라이브 루트 폴더를 사용하지 않아요.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" onclick="toggle(this)">
+        <span class="badge badge-red">높은 가능성</span>
+        <span class="card-title">설치 시 파란 경고창이 뜨고 막혀요</span>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="symptom"><b>증상:</b> "Windows가 PC를 보호했습니다" 또는 "알 수 없는 게시자" 경고</div>
+        <ul class="step-list">
+          <li>경고창에서 <b>'추가 정보'</b>를 클릭해주세요.</li>
+          <li><b>'실행'</b> 버튼이 나타나면 클릭해서 설치를 진행하세요.</li>
+          <li>'실행' 버튼이 아예 없다면 기관 보안 정책으로 외부 소프트웨어 설치 자체가 차단된 거예요. IT 담당자 문의가 필요해요.</li>
+        </ul>
+        <div class="warn">⚠️ 곤글박이는 코드 서명 인증서가 없어 SmartScreen 경고가 정상적으로 표시돼요. 악성 소프트웨어가 아니에요.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" onclick="toggle(this)">
+        <span class="badge badge-amber">확인 필요</span>
+        <span class="card-title">첫 실행 시 모델 다운로드가 시작도 안 돼요 (기관 네트워크)</span>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="symptom"><b>증상:</b> 다운로드 화면에서 아무 진행도 없음</div>
+        <ul class="step-list">
+          <li>기관 네트워크는 외부 대용량 다운로드를 차단하는 경우가 있어요.</li>
+          <li><b>스마트폰 핫스팟</b>으로 바꿔서 다운로드해보세요. 약 1.5GB 데이터가 필요해요.</li>
+          <li>다운로드 완료 후에는 인터넷 없이 사내 네트워크에서도 변환 가능해요.</li>
+        </ul>
+        <div class="tip">💡 AI 모델은 최초 1회만 다운로드하면 돼요.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" onclick="toggle(this)">
+        <span class="badge badge-teal">참고</span>
+        <span class="card-title">오래된 PC (RAM 8GB 이하, 구형 CPU)</span>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="symptom"><b>증상:</b> 변환이 매우 느리거나 중간에 앱이 멈춤</div>
+        <ul class="step-list">
+          <li>설정에서 모델을 <b>Small</b>로 바꿔주세요. 메모리 사용량이 크게 줄고 속도가 빨라져요.</li>
+          <li>변환 전 크롬, 한글 등 다른 앱을 모두 종료해주세요.</li>
+          <li>파일을 <b>15~20분 단위로 나눠서</b> 순서대로 변환하는 것을 권장해요.</li>
+          <li>변환 중 PC를 다른 용도로 사용하지 마세요.</li>
+        </ul>
+        <div class="warn">⚠️ 10년 이상 된 노트북에서 1시간 녹음 변환 시 2~3시간이 걸릴 수 있어요. Small 모델 사용 시 30~60분으로 단축 가능해요.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════════════════════════════════════ 디버그 파일 -->
+  <div class="debug-box">
+    <h3>📋 문제가 해결되지 않을 때 — 디버그 파일</h3>
+    <p>곤글박이는 오류 발생 시 자동으로 디버그 파일을 만들어요. 이 파일을 프로그램 배포자에게 전달하면 원인 파악에 도움이 돼요.</p>
+    <p><b>파일 위치:</b></p>
+    <div class="debug-path">C:\Users\사용자이름\gongulbaki_debug.txt</div>
+    <p style="margin-top:10px;"><b>파일 찾는 방법:</b></p>
+    <ol class="debug-steps">
+      <li><span class="num">①</span><span>파일 탐색기를 열어주세요 (윈도우 키 + E)</span></li>
+      <li><span class="num">②</span><span>상단 주소창을 클릭하고 <span class="code">%USERPROFILE%</span> 를 입력 후 Enter</span></li>
+      <li><span class="num">③</span><span><span class="code">gongulbaki_debug.txt</span> 파일을 찾아 배포자에게 전달해주세요</span></li>
+    </ol>
+  </div>
+
+  <div class="footer-note">© 2026. An In-song. Distributed for free. (2026. 안인성. 무료 배포)</div>
+
+</div>
+
+<script>
+  async function copyDebugLog() {
+    try {
+      const res = await fetch('http://127.0.0.1:5577/api/debug-log');
+      const data = await res.json();
+      await navigator.clipboard.writeText(data.content);
+      showToast('디버그 로그가 복사됐어요! 문의 시 붙여넣기(Ctrl+V)해서 보내주세요.');
+    } catch {
+      showToast('복사 실패 — %USERPROFILE%\\gongulbaki_debug.txt 파일을 직접 보내주세요.');
+    }
+  }
+
+  function showToast(msg) {
+    const t = document.createElement('div');
+    t.textContent = msg;
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1f2937;color:white;padding:10px 18px;border-radius:8px;font-size:12px;z-index:999;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,0.2)';
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 3000);
+  }
+
+  function toggle(header) {
+    const body = header.nextElementSibling;
+    const chev = header.querySelector('.chevron');
+    const open = body.classList.toggle('open');
+    chev.classList.toggle('open', open);
+  }
+  function switchTab(tab) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.querySelector(`[onclick="switchTab('${tab}')"]`).classList.add('active');
+    document.getElementById('panel-' + tab).classList.add('active');
+  }
+</script>
+</body>
+</html>

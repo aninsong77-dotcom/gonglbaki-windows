@@ -1,0 +1,15 @@
+node_modules/
+dist/
+release/
+resources/
+server/venv/
+server/build/
+server/dist/
+server/__pycache__/
+*.log
+Thumbs.db
+desktop.ini
+.claude/
+*.exe
+*.dll
+public/새 폴더/

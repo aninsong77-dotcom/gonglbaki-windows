@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>곤글박이</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // 앱 전체에서 Ctrl+휠 브라우저 줌 방지 (가계도 캔버스 자체 줌은 별도 처리)
+      document.addEventListener('wheel', function(e) {
+        if (e.ctrlKey) e.preventDefault();
+      }, { passive: false });
+      document.addEventListener('keydown', function(e) {
+        if (e.ctrlKey && (e.key === '+' || e.key === '-' || e.key === '=' || e.key === '0')) e.preventDefault();
+      });
+    </script>
+  </body>
+</html>
