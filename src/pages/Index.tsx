@@ -618,6 +618,7 @@ export default function Index() {
   }, [activeTab]);
 
   const [mode, setMode] = useState<"raw" | "split">("raw");
+  const [showResumeSplitModal, setShowResumeSplitModal] = useState(false);
   const [rawText, setRawText] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
   const [linesHistory, setLinesHistory] = useState<Line[][]>([]);
@@ -765,6 +766,10 @@ export default function Index() {
   const nextIndexFor = (arr: Line[], sp: Speaker) => arr.filter(l => l.speaker === sp).length + 1;
 
   const startSplitting = () => {
+    if (lines.length > 1) {
+      setShowResumeSplitModal(true);
+      return;
+    }
     setLines([{ id: Date.now(), speaker: "C", index: 1, time: current, text: rawText.trim() }]);
     setMode("split");
   };
@@ -917,6 +922,9 @@ export default function Index() {
   const [showNewRecordModal, setShowNewRecordModal] = useState(false);
   const [pendingSaveDocxBlob, setPendingSaveDocxBlob] = useState<Blob | null>(null);
   const [pendingSaveName, setPendingSaveName] = useState("");
+  const [showDocxSettingsModal, setShowDocxSettingsModal] = useState(false);
+  const [docxFontSize, setDocxFontSize] = useState(10);
+  const [docxLineSpacing, setDocxLineSpacing] = useState(1.6);
   const onFileSelect = (f: File) => {
     setPendingFile(f);
   };
@@ -1103,12 +1111,17 @@ export default function Index() {
     a.download = baseName() + ".txt"; a.click();
   };
 
-  const exportDocx = async () => {
+  const exportDocx = async (fontSize: number, lineSpacing: number) => {
+    const halfPt = fontSize * 2;
+    const lineVal = Math.round(lineSpacing * 240);
     const paras: Paragraph[] = [];
     if (mode === "raw") {
       for (const p of rawText.split(/\n+/)) {
         if (!p.trim()) continue;
-        paras.push(new Paragraph({ children: [new TextRun({ text: p, size: 24 })] }));
+        paras.push(new Paragraph({
+          spacing: { line: lineVal, lineRule: "auto" },
+          children: [new TextRun({ text: p, size: halfPt })],
+        }));
       }
     } else {
       const activeLines = lines.filter(l => l.text.trim());
@@ -1118,15 +1131,12 @@ export default function Index() {
         const timeStr = showTime ? ` (${fmt(l.time)})` : "";
         const prefix = `${tag}${timeStr} : `;
         const indent = prefix.length * 115;
-        // 이전 발화자와 다를 때 위 간격 넓힘
-        const prevSpeaker = i > 0 ? activeLines[i - 1].speaker : null;
-        const spacingBefore = prevSpeaker !== null && prevSpeaker !== l.speaker ? 160 : 0;
         paras.push(new Paragraph({
           indent: { left: indent, hanging: indent },
-          spacing: { before: spacingBefore, after: 40, line: 276, lineRule: "auto" },
+          spacing: { line: lineVal, lineRule: "auto" },
           children: [
-            new TextRun({ text: prefix, bold: true, color: "000000", size: 24 }),
-            new TextRun({ text: l.text, color: "000000", size: 24 }),
+            new TextRun({ text: prefix, bold: true, color: "000000", size: halfPt }),
+            new TextRun({ text: l.text, color: "000000", size: halfPt }),
           ],
         }));
       }
@@ -1906,7 +1916,7 @@ export default function Index() {
               try {
                 const res = await fetch("http://127.0.0.1:5577/api/debug-log");
                 const data = await res.json();
-                await navigator.clipboard.writeText(data.content);
+                await (window as any).electronAPI.clipboardWrite(data.content);
                 alert("디버그 파일이 클립보드에 복사됐어요!\n문의 시 붙여넣기(Ctrl+V)해서 보내주세요.");
               } catch {
                 alert("복사에 실패했어요. %USERPROFILE%\\gongulbaki_debug.txt 파일을 직접 열어주세요.");
@@ -1955,6 +1965,73 @@ export default function Index() {
 
       {/* ── 파일 선택 모달: 재생만 할지 변환할지 ── */}
       {/* ── 세션 저장 확인 모달 ── */}
+      {showResumeSplitModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-2xl px-8 py-7 flex flex-col gap-4 w-[340px]">
+            <p className="font-bold text-[15px] text-gray-800">이전 화자 분리 내용이 있어요</p>
+            <p className="text-xs text-gray-500 leading-relaxed">이어서 편집하시겠어요?<br />새로 시작하면 이전 분리 내용이 사라집니다.</p>
+            <div className="flex flex-col gap-2">
+              <Button className="bg-[#3a6a4a] hover:bg-[#2d5a3a] text-white w-full h-10 text-sm"
+                onClick={() => { setShowResumeSplitModal(false); setMode("split"); }}>
+                이어서 편집
+              </Button>
+              <Button variant="outline" className="w-full h-10 text-sm"
+                onClick={() => {
+                  setShowResumeSplitModal(false);
+                  setLinesWithHistory(() => [{ id: Date.now(), speaker: "C", index: 1, time: current, text: rawText.trim() }]);
+                  setMode("split");
+                }}>
+                새로 시작
+              </Button>
+            </div>
+            <button onClick={() => setShowResumeSplitModal(false)}
+              className="text-xs text-gray-400 hover:text-gray-600 text-center">취소</button>
+          </div>
+        </div>
+      )}
+
+      {showDocxSettingsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-2xl px-8 py-7 flex flex-col gap-5 w-[340px]">
+            <p className="font-bold text-[15px] text-gray-800">📄 워드 저장 설정</p>
+            <div className="flex flex-col gap-2">
+              <div className="flex justify-between items-center">
+                <label className="text-sm text-gray-600">글씨 크기</label>
+                <span className="text-sm font-semibold text-[#3a6a4a] w-10 text-right">{docxFontSize}pt</span>
+              </div>
+              <input type="range" min={8} max={16} step={0.5} value={docxFontSize}
+                onChange={e => setDocxFontSize(Number(e.target.value))}
+                className="w-full accent-[#3a6a4a]" />
+              <div className="flex justify-between text-[10px] text-gray-400">
+                <span>8pt</span><span>12pt</span><span>16pt</span>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <div className="flex justify-between items-center">
+                <label className="text-sm text-gray-600">줄 간격</label>
+                <span className="text-sm font-semibold text-[#3a6a4a] w-16 text-right">{docxLineSpacing.toFixed(2)}배</span>
+              </div>
+              <input type="range" min={1.0} max={2.0} step={0.05} value={docxLineSpacing}
+                onChange={e => setDocxLineSpacing(Number(e.target.value))}
+                className="w-full accent-[#3a6a4a]" />
+              <div className="flex justify-between text-[10px] text-gray-400">
+                <span>1.0배</span><span>1.6배(기본)</span><span>2.0배</span>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-1">
+              <Button className="flex-1 bg-[#3a6a4a] hover:bg-[#2d5a3a] text-white h-10 text-sm"
+                onClick={() => { setShowDocxSettingsModal(false); exportDocx(docxFontSize, docxLineSpacing); }}>
+                저장
+              </Button>
+              <Button variant="outline" className="flex-1 h-10 text-sm"
+                onClick={() => setShowDocxSettingsModal(false)}>
+                취소
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showSessionModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-2xl shadow-2xl px-8 py-7 flex flex-col gap-4 w-[360px]">
@@ -2064,7 +2141,7 @@ export default function Index() {
                 </span>
               </Button>
             </label>
-            <Button size="sm" onClick={exportDocx} data-tour="btn-save"
+            <Button size="sm" onClick={() => setShowDocxSettingsModal(true)} data-tour="btn-save"
               className="gap-1 bg-[#3a6a4a] hover:bg-[#2d5a3a] text-white border-0">
               <Save className="w-3.5 h-3.5" /> 문서 저장
             </Button>

@@ -626,7 +626,7 @@ def transcribe():
                         continue
                     seg_start = hms_to_sec(m.group(1)) + start_sec
                     seg_end   = hms_to_sec(m.group(2)) + start_sec
-                    text      = m.group(3).strip()
+                    text      = " ".join(m.group(3).split())
                     if not text:
                         continue
 
@@ -686,7 +686,7 @@ def transcribe():
                     abs_start = start_sec + seg.start
                     abs_end   = start_sec + seg.end
                     t_stamp = f"({int(abs_start//60):02d}:{int(abs_start%60):02d}) " if show_time else ""
-                    line = f"{t_stamp}{seg.text.strip()}"
+                    line = f"{t_stamp}{' '.join(seg.text.split())}"
                     full_text.append(line + "\n\n")
                     yield "data: " + json.dumps({"type":"segment","text":line,"progress":round((abs_end/total_duration_sec)*100,1),"start_sec":round(abs_start,2),"end_sec":round(abs_end,2)}) + "\n\n"
 

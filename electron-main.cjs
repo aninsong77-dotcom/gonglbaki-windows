@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen } = require("electron");
+const { app, BrowserWindow, ipcMain, screen, clipboard } = require("electron");
 const path = require("path");
 const { spawn } = require("child_process");
 const http = require("http");
@@ -159,6 +159,7 @@ ipcMain.on("close-confirmed", () => {
 ipcMain.on("close-cancelled", () => {});
 
 ipcMain.handle("window-is-maximized", () => mainWindow?.isMaximized() ?? false);
+ipcMain.handle("clipboard-write", (_, text) => { clipboard.writeText(text); });
 
 app.whenReady().then(() => {
   startPython();

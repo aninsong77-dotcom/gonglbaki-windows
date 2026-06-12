@@ -18,4 +18,5 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // 모델 다운로드용
   onStartDownload: (cb) => ipcRenderer.on("start-download", () => cb()),
   modelsReady: () => ipcRenderer.send("models-ready"),
+  clipboardWrite: (text) => ipcRenderer.invoke("clipboard-write", text),
 });
