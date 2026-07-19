@@ -714,7 +714,10 @@ export default function Genogram({ onOpenTour }: { onOpenTour?: () => void } = {
         return;
       }
       try {
-        if (data.version !== 1) { alert("지원하지 않는 가계도 파일 형식입니다."); return; }
+        // version 필드가 아예 없는 파일(앱 밖에서 만들어진 JSON 등)도 nodes 배열만 있으면 최선을 다해 불러옴
+        if (!Array.isArray(data.nodes) || (data.version !== undefined && data.version !== 1)) {
+          alert("지원하지 않는 가계도 파일 형식입니다."); return;
+        }
         saveHistory();
         setNodes(data.nodes ?? []);
         setLines(data.lines ?? []);
