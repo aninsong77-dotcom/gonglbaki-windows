@@ -39,3 +39,22 @@
   * { @apply border-border; }
   body { @apply bg-background text-foreground; font-feature-settings: "kern","liga"; }
 }
+
+/* 변환 대기 안내문 — 글자가 차례로 한 바퀴 도는 효과 */
+@keyframes letter-spin {
+  0%, 70% { transform: rotateY(0deg); }
+  85% { transform: rotateY(360deg); }
+  100% { transform: rotateY(360deg); }
+}
+.letter-spin { display: inline-block; animation: letter-spin 2.4s ease-in-out infinite; }
+
+/* 워드(docx) 읽기 전용 미리보기 — mammoth.js가 만든 원시 HTML용 최소 서식 */
+.docx-preview h1, .docx-preview h2, .docx-preview h3 { font-weight: 700; margin: 0.8em 0 0.4em; }
+.docx-preview h1 { font-size: 1.25rem; }
+.docx-preview h2 { font-size: 1.1rem; }
+.docx-preview h3 { font-size: 1rem; }
+.docx-preview p { margin: 0.4em 0; }
+.docx-preview ul, .docx-preview ol { margin: 0.4em 0; padding-left: 1.5em; }
+.docx-preview table { border-collapse: collapse; margin: 0.6em 0; width: 100%; }
+.docx-preview td, .docx-preview th { border: 1px solid hsl(30 15% 88%); padding: 0.4em 0.6em; text-align: left; }
+.docx-preview img { max-width: 100%; }

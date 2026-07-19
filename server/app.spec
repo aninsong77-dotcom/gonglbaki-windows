@@ -1,10 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_all
+
+# kiwipiepy(형태소 분석)는 네이티브 모듈 + 사전 데이터가 함께 있어야 작동
+_kiwi_datas, _kiwi_bins, _kiwi_hidden = [], [], []
+for _pkg in ("kiwipiepy", "kiwipiepy_model"):
+    d, b, h = collect_all(_pkg)
+    _kiwi_datas += d; _kiwi_bins += b; _kiwi_hidden += h
+
 a = Analysis(
     ['app.py'],
     pathex=[],
-    binaries=[],
-    datas=[],
-    hiddenimports=['psutil'],
+    binaries=_kiwi_bins,
+    datas=_kiwi_datas,
+    hiddenimports=['psutil'] + _kiwi_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

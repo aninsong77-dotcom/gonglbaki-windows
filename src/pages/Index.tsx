@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, Fragment } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,11 +10,13 @@ import {
 } from "@/components/ui/select";
 import {
   Play, Pause, Upload, Save, Settings,
-  Cpu, ShieldCheck, Clock, SkipBack, SkipForward, Undo2, BookOpen, Pencil, HelpCircle,
+  Cpu, ShieldCheck, Clock, SkipBack, SkipForward, Undo2, Redo2, BookOpen, Pencil, HelpCircle, BarChart3, Hourglass,
+  FolderOpen, Lock, CheckCircle2, LayoutPanelTop, FolderClock,
 } from "lucide-react";
 import gongulbakiLogo from "@/assets/gongulbaki-logo.png";
 import { Document, Packer, Paragraph, TextRun } from "docx";
 import Genogram from "./Genogram";
+import CaseDrawer from "./CaseDrawer";
 
 // HWP 저장 = docx 형식으로 저장 (HWP 호환)
 
@@ -210,94 +212,133 @@ function ModelManager({
     setDeleting(null);
   };
 
-  return (
-    <div className="space-y-2 px-2">
+  // 2026-07 단일화: 변환 모델 = whisper.cpp large-v3-turbo 하나. 선택 UI 대신 설명을 보여준다.
+  const TURBO_KEY = "large-v3-turbo";
+  const turboCached = cppModelsState[TURBO_KEY]?.cached ?? false;
+  const isTurboDownloading = downloading === TURBO_KEY;
 
-      {/* ── 엔진 선택 (한 줄씩, 컴팩트) ── */}
+  return (
+    <div className="space-y-3 px-2">
+
+      {/* ── 변환 모델 (단일) ── */}
       <div className="space-y-1">
-        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">변환 엔진</p>
-        <div className="space-y-1">
-          {([
-            { id: "python" as Engine, label: "faster-whisper", badge: "기존", desc: "Python · GPU 지원" },
-            { id: "cpp"    as Engine, label: "whisper.cpp",    badge: "신규", desc: "C++ · 가볍고 빠름" },
-          ] as { id: Engine; label: string; badge: string; desc: string }[]).map(({ id, label, badge, desc }) => {
-            const isSelected = currentEngine === id;
-            const hasModels = id === "cpp"
-              ? Object.values(cppModelsState).some(s => s.cached)
-              : Object.values(modelsState).some(s => s.cached);
-            return (
-              <button key={id} onClick={() => onEngineChange(id)}
-                className={`w-full rounded-lg border px-2.5 py-1.5 flex items-center gap-2 transition-colors text-left ${isSelected ? "border-[#3a6a4a] bg-[#f0f7f2]" : "border-gray-200 bg-gray-50 hover:bg-gray-100"}`}>
-                <div className={`w-3 h-3 rounded-full border-2 shrink-0 transition-colors ${isSelected ? "border-[#3a6a4a] bg-[#3a6a4a]" : "border-gray-300 bg-white"}`} />
-                <span className="text-xs font-semibold text-gray-700">{label}</span>
-                <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${id === "cpp" ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-500"}`}>{badge}</span>
-                <span className="text-[10px] text-gray-400">· {desc}</span>
-                {!hasModels && <span className="text-[10px] text-orange-400 ml-auto shrink-0">모델 없음</span>}
-                {isSelected && hasModels && <span className="text-[10px] font-bold text-[#3a6a4a] bg-[#e0f0e8] px-2 py-0.5 rounded-full shrink-0 ml-auto">사용 중</span>}
-              </button>
-            );
-          })}
+        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">음성 인식 엔진</p>
+        <div className={`rounded-lg border px-3 py-2 ${turboCached ? "border-[#3a6a4a] bg-[#f0f7f2]" : "border-gray-200 bg-gray-50"}`}>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-gray-700">Whisper large-v3-turbo</span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold bg-blue-100 text-blue-600">OpenAI 공식</span>
+            <span className="text-[10px] text-gray-400">(약 1.6GB)</span>
+            <div className="ml-auto shrink-0">
+              {turboCached && !isTurboDownloading && (
+                <span className="text-[10px] font-bold text-[#3a6a4a] bg-[#e0f0e8] px-2 py-0.5 rounded-full">사용 중</span>
+              )}
+              {!turboCached && !isTurboDownloading && (
+                <button onClick={() => handleDownload(TURBO_KEY)}
+                  className="text-[10px] px-2.5 py-1 rounded-full bg-[#3a6a4a] text-white hover:bg-[#2d5a3a] transition-colors font-medium">
+                  📥 다운로드
+                </button>
+              )}
+            </div>
+          </div>
+          {isTurboDownloading && (
+            <div className="mt-1.5 flex items-center gap-1.5">
+              <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                <div className="h-full bg-[#3a6a4a] rounded-full transition-all duration-500" style={{ width: `${downloadProgress}%` }} />
+              </div>
+              <span className="text-[10px] text-gray-400 shrink-0">
+                {downloadError ? "❌ 오류" : downloadProgress < 100 ? "다운로드 중..." : "✓ 완료"}
+              </span>
+            </div>
+          )}
+          <p className="text-[11px] text-gray-500 mt-1.5 leading-relaxed">
+            여러 모델을 실측 비교해 정확도·속도·용량의 균형이 가장 좋은 모델 하나로 통일했어요.
+            최상위 모델(large)의 "듣는 능력"은 그대로 두고 처리 구조만 경량화한 모델로,
+            한국어 상담 녹음 실측에서 중급 모델(medium)보다 정확했습니다.
+          </p>
         </div>
       </div>
 
-      {/* ── 구분선 ── */}
-      <div className="border-t border-gray-100" />
+      {/* ── 출처와 안전성 ── */}
+      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 space-y-1">
+        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">출처와 안전성</p>
+        <div className="text-[11px] text-gray-500 leading-relaxed space-y-1">
+          <p><b className="text-gray-600">개발</b> · OpenAI (Whisper 프로젝트, 2024년 공개) / <b className="text-gray-600">라이선스</b> · MIT (자유로운 사용 허가)</p>
+          <p><b className="text-gray-600">배포</b> · whisper.cpp 공식 저장소 — 전 세계 개발자들이 검증하며 쓰는 공개 저장소에서 받으며, 파일 무결성(변조 여부)을 전자 지문(SHA-256)으로 대조 확인했습니다.</p>
+          <p><b className="text-gray-600">작동</b> · 모델은 프로그램이 아닌 데이터 파일이며, 변환은 인터넷 없이 이 컴퓨터 안에서만 이루어집니다. <b className="text-gray-600">음성과 변환 내용은 어떤 서버로도 전송되지 않습니다.</b></p>
+        </div>
+      </div>
 
-      {/* ── 모델 선택 ── */}
-      <div className="space-y-1">
-        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">변환 모델</p>
-        {MODEL_INFO.map(({ key, label, size, desc }) => {
-          const st        = activeState[key];
-          const isCurrent = currentModel === key;
-          const isCached  = st?.cached ?? false;
-          const isDownloading = downloading === key;
-          const isDeleting    = deleting === key;
-          const engineLabel   = currentEngine === "cpp" ? "whisper.cpp" : "Whisper";
+      {/* ── 곤글박이 추가 처리 기술 ── */}
+      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 space-y-1">
+        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">긴 녹음을 위한 곤글박이 처리 기술</p>
+        <div className="text-[11px] text-gray-500 leading-relaxed space-y-1">
+          <p><b className="text-gray-600">① 구간 분할 변환</b> · 긴 녹음을 10분 단위로 나눠 순차 변환하고 경계는 겹쳐 읽어 중복을 자동 제거 — 오류가 뒤로 번지는 것을 차단하고, 앞부분부터 바로 확인·수정할 수 있어요.</p>
+          <p><b className="text-gray-600">② 무음 구간 제거</b> · 5초 이상의 침묵을 변환 전에 걸러냅니다. 침묵은 음성인식 모델이 없는 말을 만들어내는(환각) 주요 원인으로 알려져 있어요.</p>
+          <p><b className="text-gray-600">③ 반복·환각 억제</b> · 같은 문장이 비정상적으로 반복되는 현상을 모델 판정 기준 조정 + 결과 자동 정리로 이중으로 걸러냅니다. 실제 장시간 상담 녹음으로 검증했어요.</p>
+        </div>
+      </div>
 
-          return (
-            <div key={key}
-              className={`rounded-lg border px-2.5 py-1.5 flex items-center gap-2 transition-colors ${isCurrent && isCached ? "border-[#3a6a4a] bg-[#f0f7f2]" : "border-gray-200 bg-gray-50"}`}>
-              <button
-                disabled={!isCached}
-                onClick={() => isCached && onModelChange(key)}
-                className={`w-3 h-3 rounded-full border-2 shrink-0 transition-colors ${isCurrent && isCached ? "border-[#3a6a4a] bg-[#3a6a4a]" : "border-gray-300 bg-white"} ${!isCached ? "opacity-30 cursor-not-allowed" : "cursor-pointer"}`}
-              />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-semibold text-gray-700">{engineLabel} {label}</span>
-                  <span className="text-[10px] text-gray-400">· {desc}</span>
-                  <span className="text-[10px] text-gray-400">({size})</span>
-                </div>
-                {isDownloading && (
-                  <div className="mt-1 flex items-center gap-1.5">
-                    <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                      <div className="h-full bg-[#3a6a4a] rounded-full transition-all duration-500" style={{ width: `${downloadProgress}%` }} />
-                    </div>
-                    <span className="text-[10px] text-gray-400 shrink-0">
-                      {downloadError ? "❌ 오류" : downloadProgress < 100 ? "다운로드 중..." : "✓ 완료"}
-                    </span>
-                  </div>
-                )}
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                {isCurrent && isCached && <span className="text-[10px] font-bold text-[#3a6a4a] bg-[#e0f0e8] px-2 py-0.5 rounded-full">사용 중</span>}
-                {!isCached && !isDownloading && (
-                  <button onClick={() => handleDownload(key)}
-                    className="text-[10px] px-2.5 py-1 rounded-full bg-[#3a6a4a] text-white hover:bg-[#2d5a3a] transition-colors font-medium">
-                    📥 다운로드
-                  </button>
-                )}
-                {isDownloading && <span className="text-[10px] text-gray-400">⏳</span>}
-                {isCached && !isDownloading && (
-                  <button onClick={() => handleDelete(key)} disabled={isDeleting}
-                    className="text-[10px] px-2 py-0.5 rounded-full border border-gray-200 text-gray-400 hover:text-red-500 hover:border-red-300 transition-colors">
-                    {isDeleting ? "삭제 중..." : "🗑️ 삭제"}
-                  </button>
-                )}
-              </div>
-            </div>
-          );
-        })}
+      {/* ── 분석(요약) 모델 관리 ── */}
+      <SummaryModelSettings />
+    </div>
+  );
+}
+
+// ── 분석(요약) 모델 관리 + 설명 — 설정 화면용 ─────────────────────
+function SummaryModelSettings() {
+  const [ready, setReady] = useState<boolean | null>(null);
+  const [dl, setDl] = useState(false);
+  const [dlMb, setDlMb] = useState(0);
+  const refresh = async () => {
+    try {
+      const r = await fetch("http://127.0.0.1:5577/api/analyze/status");
+      const d = await r.json();
+      setReady(!!d.llm_model);
+    } catch { setReady(null); }
+  };
+  useEffect(() => { refresh(); }, []);
+  const download = async () => {
+    setDl(true); setDlMb(0);
+    try {
+      const res = await fetch("http://127.0.0.1:5577/api/analyze/model/download");
+      const reader = res.body!.getReader(); const dec = new TextDecoder(); let buf = "";
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split("\n\n"); buf = parts.pop()!;
+        for (const p of parts) {
+          if (!p.startsWith("data:")) continue;
+          const d = JSON.parse(p.slice(5).trim());
+          if (d.type === "progress") setDlMb(d.done_mb);
+          else if (d.type === "done") setReady(true);
+          else if (d.type === "error") throw new Error(d.msg);
+        }
+      }
+    } catch { /* 오류 시 상태 유지 */ } finally { setDl(false); refresh(); }
+  };
+  const remove = async () => {
+    if (!window.confirm("요약 모델(약 1.5GB)을 삭제할까요?\n다시 쓰려면 재다운로드가 필요합니다.")) return;
+    try { await fetch("http://127.0.0.1:5577/api/analyze/model/delete", { method: "DELETE" }); } catch {}
+    refresh();
+  };
+  return (
+    <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 space-y-1">
+      <div className="flex items-center gap-2">
+        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">분석 기능 (빈출 단어 + 회기 요약)</p>
+        <div className="ml-auto shrink-0">
+          {ready === true && !dl && (
+            <button onClick={remove} className="text-[10px] px-2 py-0.5 rounded-full border border-gray-200 text-gray-400 hover:text-red-500 hover:border-red-300 transition-colors">🗑️ 요약 모델 삭제</button>
+          )}
+          {ready === false && !dl && (
+            <button onClick={download} className="text-[10px] px-2.5 py-1 rounded-full bg-[#3a6a4a] text-white hover:bg-[#2d5a3a] transition-colors font-medium">📥 요약 모델 (1.5GB)</button>
+          )}
+          {dl && <span className="text-[10px] text-gray-400">다운로드 중... {dlMb}MB/2382MB</span>}
+        </div>
+      </div>
+      <div className="text-[11px] text-gray-500 leading-relaxed space-y-1">
+        <p><b className="text-gray-600">빈출 단어</b> · 한국어 형태소 분석기(Kiwi)가 문장을 단어 단위로 분해해 실제 등장 횟수를 셉니다. AI의 의견이 아니라 <b className="text-gray-600">집계 결과</b>라 그대로 신뢰할 수 있고, 화자 분리 후에는 내담자·상담자별로 나뉩니다.</p>
+        <p><b className="text-gray-600">회기 요약</b> · 온디바이스 언어모델(카카오 Kanana, Apache 2.0 공개 라이선스)이 축어록을 구간별로 읽고 종합합니다. 요약은 어디까지나 <b className="text-gray-600">초안</b> — 상담적 판단과 해석은 반드시 상담자의 검토를 거쳐야 합니다.</p>
+        <p>두 기능 모두 이 컴퓨터 안에서만 작동하며, 축어록과 분석 결과는 어떤 서버로도 전송되지 않습니다. 요약 모델은 선택 설치(1회 1.5GB)로, 받지 않아도 빈출 단어 정리는 사용할 수 있어요.</p>
       </div>
     </div>
   );
@@ -424,10 +465,11 @@ type TourStepDef = {
   body: string;
   position?: "top" | "bottom" | "left" | "right";
   width?: number;
+  icon?: React.ReactNode; // 이모지 대신 다른 UI 버튼들과 통일된 lucide 아이콘
 };
 
 const GENOGRAM_TOUR_STEPS: TourStepDef[] = [
-  { target: null,              title: "가계도 편집기 🌳",          body: "가족 구조와 구성원 간의 관계를\n시각적으로 그릴 수 있어요.\n주요 기능을 안내해 드릴게요." },
+  { target: null,              title: "가계도 편집기",              icon: <BookOpen className="w-4 h-4" />, body: "가족 구조와 구성원 간의 관계를\n시각적으로 그릴 수 있어요.\n주요 기능을 안내해 드릴게요." },
   { target: "geo-nodes",       title: "인물 추가 □ ○ ◇",          body: "버튼을 클릭하면 캔버스에 도형이 추가돼요.\n• 더블클릭: 이름 입력\n• 나이 자리 클릭: 나이 입력\n• 사망/내담자 토글로 상태 표시",                     position: "bottom" },
   { target: "geo-child-types", title: "자녀 유형",                  body: "유산·사산·임신 등 특수 자녀 도형이에요.\n• 임신: 빈 삼각형\n• 자연유산: 삼각형 + X\n• 인공유산: 삼각형 + X + 아랫선\n• 사산아: 작은 사각형 + X\n부모 관계선에 자녀로 연결해 사용해요.",             position: "bottom" },
   { target: "geo-lines",       title: "관계선 연결",                body: "선 종류를 먼저 선택하세요.\n인물을 우클릭 → 연결 모드 시작\n연결할 인물을 클릭하면 선이 그어집니다.\nEsc로 취소",                                         position: "bottom" },
@@ -439,21 +481,31 @@ const GENOGRAM_TOUR_STEPS: TourStepDef[] = [
   { target: "geo-actions",     title: "자녀 추가 · 뒤로",           body: "자녀 추가: 결혼/동거선 선택 후 클릭 →\n연결할 자녀 노드 클릭\n↩ 뒤로: 최대 30단계 실행 취소 (Ctrl+Z)",                                              position: "bottom" },
   { target: "geo-save",        title: "저장 · 불러오기 · 삭제",     body: "💾 저장: SVG(이미지) / JSON(이후 수정 가능)\n📂 열기: 저장된 JSON 파일 불러오기\n🗑️ 삭제(삭/제): 선택한 인물·선 삭제 (Delete 키도 가능)", position: "bottom", width: 340 },
   { target: "geo-canvas",      title: "캔버스 조작",                body: "• 드래그: 인물 이동\n• Shift+클릭: 다중 선택\n• 휠 스크롤: 줌 인/아웃\n• Alt+드래그: 화면 이동\n• Delete: 선택 항목 삭제",                              position: "top"    },
-  { target: "help-btn",        title: "문제가 생겼을 때 🔧",        body: "이 버튼을 클릭하면 자주 발생하는 문제와\n해결 방법 안내 페이지가 열려요.\n\n📋 버튼: 디버그 로그 복사 후 문의 시 전송",                              position: "bottom" },
-  { target: null,              title: "가계도 준비 완료! ✅",       body: "이제 직접 그려보세요!\n[?] 버튼으로 언제든 다시 볼 수 있어요." },
+  { target: "help-btn",        title: "문제가 생겼을 때",           icon: <HelpCircle className="w-4 h-4" />, body: "이 버튼을 클릭하면 자주 발생하는 문제와\n해결 방법 안내 페이지가 열려요.\n\n디버그 로그 복사 버튼으로 문의 시 함께 보내주시면 도움이 됩니다.",                              position: "bottom" },
+  { target: null,              title: "가계도 준비 완료",           icon: <CheckCircle2 className="w-4 h-4" />, body: "이제 직접 그려보세요!\n[?] 버튼으로 언제든 다시 볼 수 있어요." },
 ];
 
 const TOUR_STEPS: TourStepDef[] = [
-  { target: null,               title: "곤글박이에 오신 걸 환영합니다! 🪶",  body: "상담 녹음 파일을 자동으로 텍스트로 변환하고\n축어록을 쉽게 작성할 수 있어요.\n주요 기능을 빠르게 안내해 드릴게요.", width: 360 },
-  { target: "tabs",             title: "두 가지 탭",                           body: "축어록 작성과 가계도 편집,\n두 기능을 탭으로 전환할 수 있어요.",                                                             position: "bottom" },
-  { target: "btn-open-file",    title: "파일 열기 📂",                        body: "음성 파일(mp3, wav, m4a 등)을 불러오세요.\n자동으로 텍스트 변환이 시작돼요.\n변환 중 절전이 되어도 재실행 시 이어받기가 가능합니다.",    position: "bottom" },
-  { target: "btn-open-session", title: "세션 열기",                            body: "JSON으로 저장한 세션 파일을 불러와\n화자 분리 상태 그대로 이어서 편집해요.\n편집 중 파일 열기 → 재생만으로 음성을 따로 불러올 수 있어요.", position: "bottom" },
-  { target: "btn-save",         title: "문서 저장 💾",                         body: "📄 Word (.docx): 축어록 양식으로 자동 변환\n📋 JSON: 세션 열기로 다시 불러와 수정 가능\n\n⚠️ 종료 시 저장하지 않은 내용은 사라집니다.",    position: "bottom", width: 380 },
-  { target: "btn-split",        title: "화자 분리 ✏️",                         body: "변환 완료 후 이 버튼으로 편집 모드로 전환해요.\n• Enter: 줄 분할 + 화자 자동 전환\n• 화자 칩 클릭: 상담사 ↔ 내담자 ↔ 제3자\n• 되돌리기: 최대 30단계 실행 취소",   position: "bottom" },
-  { target: "player",           title: "오디오 플레이어 ▶️",                   body: "음성을 들으면서 변환 텍스트를 수정해요.\n• Shift+Space / Esc: 재생/정지\n• Shift+←/→: 3초 이동\n• 진행 바 클릭: 원하는 위치로 이동",               position: "top"    },
-  { target: "settings-btn",     title: "설정 ⚙️",                              body: "변환 엔진·모델 선택, 사용자 이름,\n시간 표시 여부를 설정할 수 있어요.",                                                              position: "bottom" },
-  { target: "help-btn",         title: "문제가 생겼을 때 🔧",                   body: "이 버튼을 클릭하면 자주 발생하는 문제와\n해결 방법을 안내하는 페이지가 열려요.\n\n📋 버튼으로 디버그 로그를 복사해\n문의 시 함께 보내주시면 도움이 됩니다.",          position: "bottom" },
-  { target: null,               title: "모든 준비 완료! ✅",                    body: "이제 곤글박이를 직접 사용해 보세요!\n\n헤더의 [?] 버튼을 누르면 언제든\n이 투어를 다시 볼 수 있어요." },
+  { target: null,               title: "곤글박이에 오신 걸 환영합니다",  icon: <BookOpen className="w-4 h-4" />,      body: "상담 녹음 파일을 자동으로 텍스트로 변환하고\n축어록을 쉽게 작성할 수 있어요.\n주요 기능을 빠르게 안내해 드릴게요.", width: 360 },
+  { target: "tabs",             title: "세 가지 탭",                     icon: <LayoutPanelTop className="w-4 h-4" />, body: "축어록 작성 · 가계도 편집 · 사례연구,\n세 기능을 탭으로 전환할 수 있어요.\n사례연구는 내담자별 자료를 모아두는 사례서랍과\n보고서를 만드는 사례연구 책상이 있는 공간이에요.",             position: "bottom", width: 340 },
+  { target: "btn-open-file",    title: "파일 열기",                     icon: <Upload className="w-4 h-4" />,         body: "음성 파일(mp3, wav, m4a 등)을 불러오세요.\n자동으로 텍스트 변환이 시작돼요.\n변환 중 절전이 되어도 재실행 시 이어받기가 가능합니다.",    position: "bottom" },
+  { target: "btn-open-session", title: "세션 열기",                     icon: <FolderOpen className="w-4 h-4" />,     body: "JSON으로 저장한 세션 파일을 불러와\n화자 분리 상태 그대로 이어서 편집해요.\n편집 중 파일 열기 → 재생만으로 음성을 따로 불러올 수 있어요.", position: "bottom" },
+  { target: "btn-save",         title: "문서 저장",                     icon: <Save className="w-4 h-4" />,           body: "Word (.docx): 축어록 양식으로 자동 변환\nJSON: 세션 열기로 다시 불러와 수정 가능\n\n종료 시 저장하지 않은 내용은 사라집니다.",    position: "bottom", width: 380 },
+  { target: "btn-split",        title: "화자 분리",                     icon: <Pencil className="w-4 h-4" />,         body: "변환 완료 후 이 버튼으로 편집 모드로 전환해요.\n• Enter: 줄 분할 + 화자 자동 전환\n• 화자 칩 클릭: 상담사 ↔ 내담자 ↔ 제3자\n• 되돌리기: 최대 30단계 실행 취소\n\n편집 중엔 커서 위치에 초록 막대가,\n재생 중인 문장엔 형광펜이 표시돼요.",   position: "bottom", width: 340 },
+  { target: "player",           title: "오디오 플레이어",                icon: <Play className="w-4 h-4" />,           body: "음성을 들으면서 변환 텍스트를 수정해요.\n• Shift+Space / Esc: 재생/정지\n• Shift+←/→: 3초 이동\n• 진행 바 클릭: 원하는 위치로 이동",               position: "top"    },
+  { target: "btn-analyze",      title: "분석",                         icon: <BarChart3 className="w-4 h-4" />,      body: "화자 분리 완료 후 사용 가능해요.\n• 빈출 단어: 형태소 분석기의 실제 집계(화자별)\n• 회기 요약: 온디바이스 AI 초안 — 직접 수정도 가능\n\n요약은 반드시 상담자 검토를 거쳐야 하는 초안이에요.", position: "bottom", width: 340 },
+  { target: "settings-btn",     title: "설정",                         icon: <Settings className="w-4 h-4" />,       body: "변환 모델·요약 모델 다운로드 관리,\n사용자 이름, 시간 표시 여부를 설정할 수 있어요.",                                                              position: "bottom" },
+  { target: "help-btn",         title: "문제가 생겼을 때",               icon: <HelpCircle className="w-4 h-4" />,     body: "이 버튼을 클릭하면 사용설명서(검색 가능)와\n문제 해결 안내 페이지가 열려요.\n\n디버그 로그 복사 버튼으로 문의 시 함께 보내주시면 도움이 됩니다.",          position: "bottom" },
+  { target: null,               title: "모든 준비 완료",                icon: <CheckCircle2 className="w-4 h-4" />,   body: "이제 곤글박이를 직접 사용해 보세요!\n\n헤더의 [?] 버튼을 누르면 언제든\n이 투어를 다시 볼 수 있어요." },
+];
+
+const CASE_DRAWER_TOUR_STEPS: TourStepDef[] = [
+  { target: null,              title: "사례연구",                  icon: <FolderClock className="w-4 h-4" />,    body: "내담자별 사례 자료를 사례서랍에 모아두고,\n상담 들어가기 전에 훑어보거나\n사례연구 책상에서 보고서를 만들 수 있는 공간이에요.\n주요 기능을 안내해 드릴게요.", width: 360 },
+  { target: "case-search",     title: "검색",                      body: "내담자명 · 상담기간 · 회차 번호로\n사례 목록을 바로 찾을 수 있어요.",              position: "bottom" },
+  { target: "case-new",        title: "새 사례 만들기",             body: "내담자명·시작일·색 라벨을 정하고,\n가계도·1회차 자료를 함께 첨부할 수 있어요.\n(나머지 자료는 나중에 언제든 추가 가능)",    position: "bottom", width: 340 },
+  { target: "case-lock",       title: "잠금",                      icon: <Lock className="w-4 h-4" />,           body: "사례서랍은 비밀번호로 보호돼요.\n이 버튼으로 언제든 즉시 다시 잠글 수 있어요.\n(비밀번호는 앱을 여는 열쇠일 뿐, 파일 자체 암호화는 아니에요)", position: "bottom", width: 340 },
+  { target: null,              title: "사례 안의 구성",             icon: <FolderOpen className="w-4 h-4" />,     body: "사례를 펼치면 두 영역이 있어요.\n• 사례 전체 자료: 기본정보·가계도·심리검사·슈퍼비전\n• 회차별 자료: 음성·축어록·분석 파일 연결\n\n모든 내용은 처음 지정한 폴더에\n실제 파일로 저장돼요 — 앱을 지워도 안전해요.", width: 360 },
+  { target: null,              title: "사례연구 준비 완료",          icon: <CheckCircle2 className="w-4 h-4" />,   body: "이제 직접 사례를 만들어보세요!\n[?] 버튼으로 언제든 다시 볼 수 있어요." },
 ];
 
 function TourOverlay({
@@ -526,7 +578,10 @@ function TourOverlay({
       {/* 툴팁 카드 */}
       <div style={tooltipStyle()} className="bg-white rounded-lg shadow-md border border-gray-200 overflow-hidden">
         <div className="px-4 py-3.5">
-          <p className="font-medium text-gray-700 text-sm mb-1">{renderGb(step.title)}</p>
+          <p className="font-medium text-gray-700 text-sm mb-1 flex items-center gap-1.5">
+            {step.icon && <span className="text-[#3a6a4a] shrink-0">{step.icon}</span>}
+            {renderGb(step.title)}
+          </p>
           <div className="text-sm text-gray-500">{renderTourBody(step.body)}</div>
           <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
             <button onClick={onClose} className="text-[11px] text-gray-400 hover:text-gray-600">건너뛰기</button>
@@ -559,8 +614,10 @@ function TourOverlay({
 export default function Index() {
   const [userName, setUserName] = useState(() => localStorage.getItem("gb_user") || "");
   const [tempName, setTempName] = useState(userName);
-  const [model, setModel] = useState(() => localStorage.getItem("gb_model") || "medium");
-  const [engine, setEngine] = useState<Engine>(() => (localStorage.getItem("gb_engine") as Engine) || "python");
+  // 2026-07 단일화: 변환은 whisper.cpp large-v3-turbo 하나로 고정 (옛 저장값 무시).
+  // 단, turbo가 아직 다운로드 전이면 변환 시작 시 기존 자동 전환 로직이 받아둔 모델로 임시 대체함.
+  const [model, setModel] = useState("large-v3-turbo");
+  const [engine, setEngine] = useState<Engine>("cpp");
   const [showTime, setShowTime] = useState(false);
   const [isMaximized, setIsMaximized] = useState(true);
   const [showExitModal, setShowExitModal] = useState(false);
@@ -574,12 +631,13 @@ export default function Index() {
     const cleanup = electronAPI.onCloseRequested?.(() => setShowExitModal(true));
     return () => { cleanup?.(); };
   }, []);
-  const [activeTab, setActiveTab] = useState<"transcribe" | "genogram">("transcribe");
+  const [activeTab, setActiveTab] = useState<"transcribe" | "genogram" | "cases">("transcribe");
   const [openSettings, setOpenSettings] = useState(!localStorage.getItem("gb_user"));
   const [openManual, setOpenManual] = useState(false);
   const [manualTab, setManualTab] = useState<"transcribe" | "genogram">("transcribe");
   const [tourStep, setTourStep] = useState(-1);
   const [geoTourStep, setGeoTourStep] = useState(-1);
+  const [caseTourStep, setCaseTourStep] = useState(-1);
   const [contextHint, setContextHint] = useState<ContextHintData | null>(null);
 
   useEffect(() => { localStorage.setItem("gb_user", userName); }, [userName]);
@@ -588,15 +646,8 @@ export default function Index() {
 
   const tourAutoStarted = useRef(false);
 
-  // 재방문 사용자 (이름 있고 투어 안 본 경우) — 앱 시작 시 자동
-  useEffect(() => {
-    if (!localStorage.getItem("gb_tour_done") && localStorage.getItem("gb_user")) {
-      tourAutoStarted.current = true;
-      const t = setTimeout(() => setTourStep(0), 800);
-      return () => clearTimeout(t);
-    }
-  }, []);
-
+  // 최초 설치(이름 처음 저장 시)에만 투어 자동 시작 — 이후 재방문 시에는 투어를 끝까지
+  // 안 봤어도 강제로 다시 띄우지 않고 곧장 작업 화면으로 진입한다.
   // 최초 설치 (이름 처음 저장 시) — 설정창 닫힌 뒤 자동
   const prevUserNameRef = useRef(userName);
   useEffect(() => {
@@ -617,11 +668,60 @@ export default function Index() {
     }
   }, [activeTab]);
 
+  const caseTourAutoStarted = useRef(false);
+  useEffect(() => {
+    if (activeTab === "cases" && !localStorage.getItem("gb_case_tour_done") && !caseTourAutoStarted.current) {
+      caseTourAutoStarted.current = true;
+      const t = setTimeout(() => setCaseTourStep(0), 600);
+      return () => clearTimeout(t);
+    }
+  }, [activeTab]);
+
   const [mode, setMode] = useState<"raw" | "split">("raw");
+  // 스트리밍 루프(비동기 클로저) 안에서도 항상 최신 모드를 읽기 위한 ref
+  const modeRef = useRef(mode);
+  useEffect(() => { modeRef.current = mode; }, [mode]);
+
+  // 편집 커서 위치 표식(긴 줄에서 커서 찾기용) — 커서 좌표를 "읽기만" 해서
+  // 두꺼운 세로 막대(+위쪽 삼각형)를 덧그림. 텍스트 편집 동작에는 일절 개입하지 않음.
+  const [caretPos, setCaretPos] = useState<{ x: number; y: number; h: number } | null>(null);
+  useEffect(() => {
+    const update = () => {
+      const el = document.activeElement as HTMLElement | null;
+      if (!el || !el.hasAttribute || !el.hasAttribute("data-line-id")) { setCaretPos(null); return; }
+      const sel = document.getSelection();
+      if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) { setCaretPos(null); return; }
+      const range = sel.getRangeAt(0);
+      let rect: { left: number; top: number; height: number } | null = null;
+      const rects = range.getClientRects();
+      if (rects.length > 0) rect = rects[0];
+      else {
+        const br = range.getBoundingClientRect();
+        if (br && (br.left !== 0 || br.top !== 0)) rect = br;
+        else { const er = el.getBoundingClientRect(); rect = { left: er.left + 14, top: er.top + 5, height: 22 }; } // 빈 줄
+      }
+      setCaretPos(rect ? { x: rect.left, y: rect.top, h: rect.height || 22 } : null);
+    };
+    document.addEventListener("selectionchange", update);
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      document.removeEventListener("selectionchange", update);
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, []);
   const [showResumeSplitModal, setShowResumeSplitModal] = useState(false);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 2500);
+  };
   const [rawText, setRawText] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
   const [linesHistory, setLinesHistory] = useState<Line[][]>([]);
+  // rawText 중 마지막으로 화자분리(lines)에 반영된 지점 — 이후 이어서 편집 시 이 지점부터 늘어난 부분만 추가
+  const splitBaseLenRef = useRef(0);
   const [filterSpeaker, setFilterSpeaker] = useState<Speaker | "ALL">("ALL");
 
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -633,6 +733,13 @@ export default function Index() {
   const audioRef = useRef<HTMLAudioElement>(null);
 
   const [converting, setConverting] = useState(false);
+
+  // 변환 중 자모(ㄱㄴㄷㄹㅁㅂ)가 차례로 나타났다 사라지는 표시 — "멈춘 게 아니다"를 보여줌
+  useEffect(() => {
+    if (!converting) return;
+    const t = setInterval(() => setJamoIdx(i => (i + 1) % JAMO_CYCLE.length), 450);
+    return () => clearInterval(t);
+  }, [converting]);
 
   // ── 상황별 힌트 트리거 ──────────────────────────────────────────
   const prevConvertingRef = useRef(false);
@@ -667,6 +774,9 @@ export default function Index() {
   }, [mode]);
 
   const [convertStatus, setConvertStatus] = useState("");
+  // 변환 중 "멈춘 게 아니다"를 보여주는 자모 순환 표시 (ㄱㄴㄷ...)
+  const JAMO_CYCLE = ["ㄱ", "ㄴ", "ㄷ", "ㄹ", "ㅁ", "ㅂ"];
+  const [jamoIdx, setJamoIdx] = useState(0);
   const [convertProgress, setConvertProgress] = useState(0);
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -687,13 +797,224 @@ export default function Index() {
     }
   }, [errorMsg]);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const transcribeReqIdRef = useRef<string | null>(null); // 서버 측 변환 작업 ID (진짜 중지용)
+  // 재생 위치 ↔ 텍스트 매칭용 시간표 (표시 전용 — 편집/저장 로직과 무관, 세션 저장에도 안 들어감)
+  const segTimeMapRef = useRef<{ t: number; text: string }[]>([]);
 
   const cancelConvert = () => {
+    // 서버의 whisper-cli 프로세스까지 실제로 종료 (연결만 끊으면 좀비로 계속 돌아감)
+    const reqId = transcribeReqIdRef.current;
+    if (reqId) {
+      fetch("http://127.0.0.1:5577/api/transcribe/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ req_id: reqId }),
+      }).catch(() => {});
+      transcribeReqIdRef.current = null;
+    }
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
     setConverting(false);
     setConvertStatus("");
     setErrorMsg("변환이 취소됐어요.");
+  };
+
+  // ── 📊 분석 (빈출 단어 + 회기 요약) — 전부 온디바이스 ────────────────
+  const [analyzeOpen, setAnalyzeOpen] = useState(false);           // 접힘 패널 열림
+  const [analyzeBusy, setAnalyzeBusy] = useState(false);
+  const [analyzeMsg, setAnalyzeMsg] = useState("");
+  const [analyzeWords, setAnalyzeWords] = useState<{ overall: [string, number][]; speakers: Record<string, [string, number][]> } | null>(null);
+  const [analyzeSummary, setAnalyzeSummary] = useState("");
+  const [editingSummary, setEditingSummary] = useState(false);      // 요약 수정 모드
+  const [summaryDraft, setSummaryDraft] = useState("");
+  const [summaryEdited, setSummaryEdited] = useState(false);        // 사용자가 한 번이라도 고쳤는지
+  const [analyzeLabeled, setAnalyzeLabeled] = useState(false);      // 화자 라벨 기반 분석이었나
+  const [analyzeScope, setAnalyzeScope] = useState<"all" | "nae" | "sang">("all");
+  const [wordScope, setWordScope] = useState("전체"); // 빈출 단어 보기 범위 — 분석 결과가 새로 나오면 "전체"로 리셋
+  const [analyzeModelReady, setAnalyzeModelReady] = useState<boolean | null>(null); // 요약 모델 존재?
+  const [analyzeDownloading, setAnalyzeDownloading] = useState(false);
+  const [analyzeDlMb, setAnalyzeDlMb] = useState(0);
+  const [analyzeFresh, setAnalyzeFresh] = useState(false);          // 새 결과 뱃지
+  const [wordPreview, setWordPreview] = useState<{ word: string; sentences: string[] } | null>(null);
+  const analyzePartialsRef = useRef<string[]>([]);                  // 조각 요약 보관 → 화자별 전환 재활용
+  const analyzeScopeCacheRef = useRef<Record<string, string>>({});
+  // 끝난 조각을 진행 중에 바로 보여주기 — 최종 종합까지 기다릴 필요 없이 확인 가능
+  const [analyzeChunks, setAnalyzeChunks] = useState<{ index: number; total: number; text: string }[]>([]);
+  const [showChunks, setShowChunks] = useState(false);
+
+  // 분석 이어하기 — 끝난 조각 요약을 localStorage에 쌓아두고(변환 이어하기와 같은 방식),
+  // 같은 텍스트로 다시 분석을 시작하면 이어서 할지 물어본다. 완료되면 지움.
+  const ANALYZE_PROGRESS_KEY = "gb_analyze_progress";
+  const analyzeTextSig = (t: string) => `${t.length}:${t.slice(0, 120)}:${t.slice(-120)}`;
+  const saveAnalyzeProgress = (sig: string, chunks: { index: number; total: number; text: string }[]) => {
+    try { localStorage.setItem(ANALYZE_PROGRESS_KEY, JSON.stringify({ sig, chunks })); } catch { /* 용량 초과 등 — 이어하기만 포기 */ }
+  };
+  const loadAnalyzeProgress = (sig: string): { index: number; total: number; text: string }[] | null => {
+    try {
+      const raw = localStorage.getItem(ANALYZE_PROGRESS_KEY);
+      if (!raw) return null;
+      const d = JSON.parse(raw);
+      return d.sig === sig && Array.isArray(d.chunks) && d.chunks.length > 0 ? d.chunks : null;
+    } catch { return null; }
+  };
+
+  // 분석 대상 텍스트: 화자 분리돼 있으면 라벨 포함(상1:/내1:), 아니면 원문
+  const getAnalysisText = () => {
+    if (mode === "split" && lines.length > 0) {
+      return lines.filter(l => l.text.trim())
+        .map(l => `${speakerLabel(l.speaker, l.index)}: ${l.text.replace(/\n+/g, " ")}`).join("\n");
+    }
+    return rawText;
+  };
+
+  // 빈출 단어 칩 클릭 → 그 단어가 실제로 나온 문장(줄)들을 찾아 보여줌
+  const showWordSentences = (word: string) => {
+    const src = getAnalysisText();
+    const sentences = src.split(/\n+/).filter(l => l.includes(word)).slice(0, 20);
+    setWordPreview({ word, sentences });
+  };
+
+  const checkAnalyzeStatus = async (): Promise<boolean> => {
+    try {
+      const r = await fetch("http://127.0.0.1:5577/api/analyze/status");
+      const d = await r.json();
+      setAnalyzeModelReady(!!d.llm_model);
+      return !!d.llm_model;
+    } catch { setAnalyzeModelReady(false); return false; }
+  };
+
+  const downloadAnalyzeModel = async () => {
+    setAnalyzeDownloading(true); setAnalyzeDlMb(0);
+    try {
+      const res = await fetch("http://127.0.0.1:5577/api/analyze/model/download");
+      const reader = res.body!.getReader(); const dec = new TextDecoder(); let buf = "";
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split("\n\n"); buf = parts.pop()!;
+        for (const p of parts) {
+          if (!p.startsWith("data:")) continue;
+          const d = JSON.parse(p.slice(5).trim());
+          if (d.type === "progress") setAnalyzeDlMb(d.done_mb);
+          else if (d.type === "done") { setAnalyzeModelReady(true); showToast("요약 모델 다운로드 완료!"); }
+          else if (d.type === "error") throw new Error(d.msg);
+        }
+      }
+    } catch (e: any) {
+      showToast("모델 다운로드 실패: " + (e?.message || "네트워크 확인"));
+    } finally { setAnalyzeDownloading(false); }
+  };
+
+  const runAnalysis = async () => {
+    const text = getAnalysisText();
+    if (!text.trim()) { showToast("분석할 텍스트가 없어요."); return; }
+    // 지난번에 끊긴 진행이 있으면 이어서 할지 물어봄
+    const sig = analyzeTextSig(text);
+    let resumeChunks: { index: number; total: number; text: string }[] = [];
+    const saved = loadAnalyzeProgress(sig);
+    if (saved && window.confirm(`지난 분석이 조각 ${saved.length}${saved[0] ? `/${saved[0].total}` : ""}개까지 진행돼 있어요.\n이어서 할까요? (취소하면 처음부터 다시)`)) {
+      resumeChunks = saved;
+    }
+    setAnalyzeBusy(true); setAnalyzeMsg("빈출 단어 집계 중...");
+    setAnalyzeFresh(false); setWordPreview(null);
+    setEditingSummary(false); setSummaryEdited(false);
+    analyzeScopeCacheRef.current = {}; setAnalyzeScope("all"); setWordScope("전체");
+    setAnalyzeChunks(resumeChunks); setShowChunks(true);
+    try {
+      // 1) 빈출 단어 (몇 초)
+      const wr = await fetch("http://127.0.0.1:5577/api/analyze/words", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
+      });
+      setAnalyzeWords(await wr.json());
+      // 2) 회기 요약 (모델 있어야)
+      if (!(await checkAnalyzeStatus())) {
+        setAnalyzeMsg("요약 모델이 없어 단어 정리만 완료했어요. 패널에서 모델을 받아주세요.");
+        setAnalyzeBusy(false); setAnalyzeFresh(true); return;
+      }
+      setAnalyzeMsg("요약 준비 중...");
+      const res = await fetch("http://127.0.0.1:5577/api/analyze/summarize", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, resume_chunks: resumeChunks.map(c => ({ index: c.index, text: c.text })) }),
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({} as any)); throw new Error(d.error || `서버 오류 ${res.status}`); }
+      const reader = res.body!.getReader(); const dec = new TextDecoder(); let buf = "";
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split("\n\n"); buf = parts.pop()!;
+        for (const p of parts) {
+          if (!p.startsWith("data:")) continue;
+          const d = JSON.parse(p.slice(5).trim());
+          if (d.type === "progress") setAnalyzeMsg(d.msg);
+          else if (d.type === "chunk") {
+            setAnalyzeChunks((prev) => {
+              const next = [...prev, { index: d.index, total: d.total, text: d.text }];
+              saveAnalyzeProgress(sig, next); // 끊겨도 여기까지는 이어하기 가능
+              return next;
+            });
+          }
+          else if (d.type === "cancelled") { setAnalyzeMsg("분석이 중지됐어요. (다시 시작하면 이어서 할 수 있어요)"); setAnalyzeBusy(false); return; }
+          else if (d.type === "done") {
+            analyzePartialsRef.current = d.partials || [];
+            analyzeScopeCacheRef.current["all"] = d.final;
+            setAnalyzeSummary(d.final); setAnalyzeLabeled(!!d.labeled);
+            setAnalyzeMsg(""); setAnalyzeFresh(true);
+            try { localStorage.removeItem(ANALYZE_PROGRESS_KEY); } catch { /* 무시 */ }
+            showToast("분석이 준비됐어요!");
+          }
+        }
+      }
+    } catch (e: any) {
+      setAnalyzeMsg("분석 오류: " + (e?.message || "서버 확인"));
+    } finally { setAnalyzeBusy(false); }
+  };
+
+  // 화자별 요약 전환 — 이미 만든 조각 요약을 재활용해 종합만 재실행 (1분급)
+  const switchAnalyzeScope = async (scope: "all" | "nae" | "sang") => {
+    setAnalyzeScope(scope);
+    setEditingSummary(false); setSummaryEdited(false);
+    const cached = analyzeScopeCacheRef.current[scope];
+    if (cached) { setAnalyzeSummary(cached); return; }
+    if (analyzePartialsRef.current.length === 0) return;
+    setAnalyzeBusy(true); setAnalyzeMsg(scope === "nae" ? "내담자 중심 요약 중..." : scope === "sang" ? "상담자 중심 요약 중..." : "전체 요약 중...");
+    try {
+      const r = await fetch("http://127.0.0.1:5577/api/analyze/reduce", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ partials: analyzePartialsRef.current, scope }),
+      });
+      const d = await r.json();
+      if (d.final) { analyzeScopeCacheRef.current[scope] = d.final; setAnalyzeSummary(d.final); }
+      setAnalyzeMsg("");
+    } catch (e: any) { setAnalyzeMsg("요약 전환 오류: " + (e?.message || "")); }
+    finally { setAnalyzeBusy(false); }
+  };
+
+  const stopAnalysis = () => {
+    fetch("http://127.0.0.1:5577/api/analyze/stop", { method: "POST" }).catch(() => {});
+  };
+
+  const saveAnalysis = () => {
+    const w = analyzeWords;
+    // 단어는 한 줄에 하나씩(세로로 길게)이 아니라, 여러 개를 한 줄에 이어 붙여(가로로) 저장 —
+    // 미리보기(pre-wrap)에서 자연스럽게 줄바꿈되며 촘촘하게 보이도록.
+    const wordLine = (list: [string, number][]) => list.map(([a, n]) => `${a}(${n})`).join("   ");
+    let txt = "곤글박이 분석 결과 (요약은 AI 초안 — 반드시 상담자가 검토·수정)\n\n";
+    if (w) {
+      txt += "[전체 빈출 단어 TOP 50]\n" + wordLine(w.overall) + "\n\n";
+      for (const [label, list] of Object.entries(w.speakers || {}))
+        txt += `[${label} TOP 30]\n` + wordLine(list) + "\n\n";
+    }
+    for (const [scope, sum] of Object.entries(analyzeScopeCacheRef.current)) {
+      const name = scope === "all" ? "전체 요약" : scope === "nae" ? "내담자 중심 요약" : "상담자 중심 요약";
+      txt += `[${name}]\n${sum}\n\n`;
+    }
+    if (analyzePartialsRef.current.length > 0) {
+      txt += "[조각별 요약 (참고용)]\n" + analyzePartialsRef.current.join("\n\n") + "\n\n";
+    }
+    const blob = new Blob([txt], { type: "text/plain;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = baseName() + "_분석.txt"; a.click();
   };
 
   // 이어하기 관련 상태
@@ -753,6 +1074,8 @@ export default function Index() {
       if (e.key === "ArrowRight" && e.shiftKey) { e.preventDefault(); seek(3); return; }
       // Esc: 편집 중/밖 모두 재생/멈춤 (기존 유지)
       if (e.key === "Escape") { e.preventDefault(); togglePlay(); return; }
+      // Ctrl/Cmd+S: 편집 중/밖 모두 빠른 저장 (브라우저 기본 저장 다이얼로그 대체)
+      if ((e.key === "s" || e.key === "S") && (e.ctrlKey || e.metaKey)) { e.preventDefault(); quickSaveRef.current(); return; }
       // 편집 중이면 이하 단축키 비활성
       if (editing) return;
       if (e.code === "Space") { e.preventDefault(); togglePlay(); }
@@ -771,6 +1094,21 @@ export default function Index() {
       return;
     }
     setLines([{ id: Date.now(), speaker: "C", index: 1, time: current, text: rawText.trim() }]);
+    splitBaseLenRef.current = rawText.length;
+    setMode("split");
+  };
+
+  // "이어서 편집": 화자분리 이후 계속 변환되어 rawText에 새로 늘어난 부분만 마지막 줄 뒤에 추가
+  const resumeSplitting = () => {
+    const newTail = rawText.slice(splitBaseLenRef.current).trim();
+    if (newTail) {
+      setLinesWithHistory(prev => {
+        const lastSpeaker = prev.length > 0 ? prev[prev.length - 1].speaker : "C";
+        return [...prev, { id: Date.now(), speaker: lastSpeaker, index: nextIndexFor(prev, lastSpeaker), time: current, text: newTail }];
+      });
+    }
+    splitBaseLenRef.current = rawText.length;
+    setShowResumeSplitModal(false);
     setMode("split");
   };
 
@@ -870,10 +1208,13 @@ export default function Index() {
   const linesRef = useRef<Line[]>([]);
   useEffect(() => { linesRef.current = lines; }, [lines]);
 
+  const [linesRedoStack, setLinesRedoStack] = useState<Line[][]>([]);
+
   const setLinesWithHistory = (updater: (prev: Line[]) => Line[]) => {
     const prev = linesRef.current;
     const next = updater(prev);
     setLinesHistory(h => [...h.slice(-30), prev]);
+    setLinesRedoStack([]); // 새로 편집하면 되돌리기 이전의 "다시 실행" 갈래는 무효
     setLines(next);
   };
 
@@ -881,8 +1222,19 @@ export default function Index() {
     setLinesHistory(h => {
       if (h.length === 0) return h;
       const prev = h[h.length - 1];
+      setLinesRedoStack(r => [...r.slice(-30), linesRef.current]);
       setLines(prev);
       return h.slice(0, -1);
+    });
+  };
+
+  const redoLines = () => {
+    setLinesRedoStack(r => {
+      if (r.length === 0) return r;
+      const next = r[r.length - 1];
+      setLinesHistory(h => [...h.slice(-30), linesRef.current]);
+      setLines(next);
+      return r.slice(0, -1);
     });
   };
 
@@ -918,10 +1270,6 @@ export default function Index() {
 
   // ── 파일 선택 시 재생만 할지 변환할지 선택 ─────────────────────
   const [pendingFile, setPendingFile] = useState<File | null>(null);
-  const [showSessionModal, setShowSessionModal] = useState(false);
-  const [showNewRecordModal, setShowNewRecordModal] = useState(false);
-  const [pendingSaveDocxBlob, setPendingSaveDocxBlob] = useState<Blob | null>(null);
-  const [pendingSaveName, setPendingSaveName] = useState("");
   const [showDocxSettingsModal, setShowDocxSettingsModal] = useState(false);
   const [docxFontSize, setDocxFontSize] = useState(10);
   const [docxLineSpacing, setDocxLineSpacing] = useState(1.6);
@@ -930,6 +1278,12 @@ export default function Index() {
   };
 
   const onFile = async (f: File, resumeFrom?: { text: string; startSec: number; progress: number }) => {
+    // 새 파일 변환 시작 시 이전 파일의 빠른저장 위치를 이어받지 않도록 초기화
+    // (아니면 이전 파일에 저장하던 핸들 그대로 남아 있어 저장 시 엉뚱한 파일을 덮어씀)
+    if (!resumeFrom) {
+      quickSaveHandleRef.current = null;
+      quickSaveJsonHandleRef.current = null;
+    }
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     saveAudioToDB(f).catch(() => {});
     const url = URL.createObjectURL(f);
@@ -951,6 +1305,8 @@ export default function Index() {
     setConvertProgress(resumeFrom?.progress ?? 0);
     setConvertStatus("음향 분석 중...");
     const baseOffset = resumeFrom?.startSec ?? 0;
+    // 재생 위치 표시용 시간표 — 새 변환이면 비우고, 이어하기면 기존 것에 이어붙임
+    if (!resumeFrom) segTimeMapRef.current = [];
     localStorage.setItem("gb_convert_progress", JSON.stringify({ fileName: f.name, progress: resumeFrom?.progress ?? 0, text: initText, startSec: baseOffset }));
     // 선택된 엔진+모델이 다운로드되어 있는지 확인, 없으면 사용 가능한 것으로 자동 전환
     let useEngine = engine;
@@ -964,9 +1320,10 @@ export default function Index() {
       const cppSt: ModelsState = await r2.json();
       const active = engine === "cpp" ? cppSt : pyState;
       if (!active[model]?.cached) {
+        // turbo 미다운로드 시: 이미 받아둔 모델로 임시 대체 (cpp 우선 — 기존 사용자의 medium/large 활용)
         let found = false;
-        for (const [k, s] of Object.entries(pyState))  { if (s.cached) { useEngine = "python"; useModel = k; found = true; break; } }
-        if (!found) for (const [k, s] of Object.entries(cppSt)) { if (s.cached) { useEngine = "cpp";    useModel = k; found = true; break; } }
+        for (const [k, s] of Object.entries(cppSt))    { if (s.cached) { useEngine = "cpp";    useModel = k; found = true; break; } }
+        if (!found) for (const [k, s] of Object.entries(pyState)) { if (s.cached) { useEngine = "python"; useModel = k; found = true; break; } }
         if (!found) {
           setConverting(false); setConvertStatus("");
           setErrorMsg("다운로드된 모델이 없습니다. 설정(⚙️)에서 모델을 다운로드해주세요.");
@@ -1010,14 +1367,37 @@ export default function Index() {
           if (!part.startsWith("data:")) continue;
           try {
             const d = JSON.parse(part.slice(5).trim());
+            if (d.type === "req_id") { transcribeReqIdRef.current = d.req_id; continue; }
             if (d.type === "status") setConvertStatus(d.msg);
             else if (d.type === "segment" || d.type === "silence") {
               collected += d.text + "\n\n"; setRawText(collected);
+              // 재생 위치 표시용 시간표에 기록 (표시 전용) — 서버가 주는 start_sec은 이미 절대시간
+              if (d.type === "segment" && d.start_sec != null) {
+                segTimeMapRef.current.push({ t: d.start_sec, text: d.text });
+              }
+              // 화자분리 화면을 보는 중에도 계속 변환되는 내용을 실시간으로 마지막 줄 뒤에 이어붙임
+              // (raw 모드일 때는 건드리지 않음 — 그 사이 늘어난 분량은 "이어서 편집" 시 한 번에 반영됨)
+              if (modeRef.current === "split") {
+                setLines(prev => {
+                  if (prev.length === 0) {
+                    return [{ id: Date.now(), speaker: "C", index: 1, time: current, text: d.text }];
+                  }
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  updated[updated.length - 1] = { ...last, text: last.text ? `${last.text}\n\n${d.text}` : d.text };
+                  return updated;
+                });
+                splitBaseLenRef.current = collected.length;
+              }
               const prog = d.progress ?? 0;
               setConvertProgress(prog); setConvertStatus(`변환 중... ${prog}%`);
               const segEndSec = d.end_sec != null ? (baseOffset + d.end_sec) : (baseOffset + (d.start_sec ?? 0));
               localStorage.setItem("gb_convert_progress", JSON.stringify({ fileName: f.name, progress: prog, text: collected, startSec: segEndSec }));
+            } else if (d.type === "cancelled") {
+              transcribeReqIdRef.current = null;
+              setConverting(false); setConvertStatus("");
             } else if (d.type === "done") {
+              transcribeReqIdRef.current = null;
               setConvertProgress(100); setConvertStatus("✅ 변환 완료!");
               localStorage.removeItem("gb_convert_progress");
               playDing(); setTimeout(() => setConverting(false), 2000);
@@ -1069,12 +1449,15 @@ export default function Index() {
   const newRecord = () => {
     if (rawText && !window.confirm("현재 내용이 지워집니다. 새 기록을 시작할까요?")) return;
     setRawText(""); setLines([]); setMode("raw");
+    setLinesHistory([]); setLinesRedoStack([]);
     setFileName(""); if (audioUrl) URL.revokeObjectURL(audioUrl);
     setAudioUrl(null); setCurrent(0); setDuration(0); setPlaying(false);
     setResumeBanner(null);
     localStorage.removeItem("gb_autosave_raw");
     localStorage.removeItem("gb_convert_progress");
     clearAudioFromDB().catch(() => {});
+    quickSaveHandleRef.current = null;
+    quickSaveJsonHandleRef.current = null;
   };
 
   const baseName = () => fileName.replace(/\.[^.]+$/, "") || "축어록";
@@ -1111,7 +1494,8 @@ export default function Index() {
     a.download = baseName() + ".txt"; a.click();
   };
 
-  const exportDocx = async (fontSize: number, lineSpacing: number) => {
+  // exportDocx·quickSave 공용: 현재 내용으로 docx Blob 생성
+  const buildDocxBlob = async (fontSize: number, lineSpacing: number) => {
     const halfPt = fontSize * 2;
     const lineVal = Math.round(lineSpacing * 240);
     const paras: Paragraph[] = [];
@@ -1144,93 +1528,65 @@ export default function Index() {
     const doc = new Document({
       sections: [{ properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 1000, bottom: 1000, left: 1200, right: 1200 } } }, children: paras }],
     });
-    const docxBlob = await Packer.toBlob(doc);
-    const name = baseName();
-    setPendingSaveDocxBlob(docxBlob);
-    setPendingSaveName(name);
-    setShowSessionModal(true);
+    return Packer.toBlob(doc);
   };
 
-  const doSaveDocx = async (docxBlob: Blob, name: string, withJson: boolean) => {
-    const sessionData = JSON.stringify({ version: 1, fileName, mode, rawText, lines, showTime });
-    const jsonBlob = new Blob([sessionData], { type: "application/json;charset=utf-8" });
+  // 한글(HWP)의 Ctrl+S처럼: 처음 한 번만 저장 위치를 묻고, 이후로는 같은 파일(들)에 덮어쓰기
+  // 기본으로 .docx(사람이 읽는 문서)와 _세션.json(다시 불러와 이어서 편집용) 둘 다 저장한다.
+  const quickSaveHandleRef = useRef<any>(null);
+  const quickSaveJsonHandleRef = useRef<any>(null);
+  const quickSave = async () => {
+    if (!hasFsApi) {
+      showToast("이 기기에서는 빠른 저장을 지원하지 않아요. '문서 저장' 버튼을 이용해주세요.");
+      return;
+    }
+    try {
+      const docxBlob = await buildDocxBlob(docxFontSize, docxLineSpacing);
+      const sessionData = JSON.stringify({ version: 1, fileName, mode, rawText, lines, showTime });
+      const jsonBlob = new Blob([sessionData], { type: "application/json;charset=utf-8" });
 
-    if (hasFsApi) {
-      try {
-        const handle = await (window as any).showSaveFilePicker({
-          suggestedName: name + ".docx",
+      if (!quickSaveHandleRef.current) {
+        quickSaveHandleRef.current = await (window as any).showSaveFilePicker({
+          suggestedName: baseName() + ".docx",
           types: [{ description: "Word 문서", accept: { "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"] } }],
         });
-        const writable = await handle.createWritable();
-        await writable.write(docxBlob);
-        await writable.close();
-        if (withJson) {
-          const savedName = (handle.name as string).replace(/\.docx$/i, "");
-          try {
-            const dir = await (handle as any).getParent();
-            const jh = await dir.getFileHandle(savedName + "_세션.json", { create: true });
-            const jw = await jh.createWritable();
-            await jw.write(jsonBlob);
-            await jw.close();
-          } catch {
-            // getParent 실패 시 showSaveFilePicker로 JSON도 await 처리
-            try {
-              const jhandle = await (window as any).showSaveFilePicker({
-                suggestedName: savedName + "_세션.json",
-                types: [{ description: "세션 파일", accept: { "application/json": [".json"] } }],
-              });
-              const jw = await jhandle.createWritable();
-              await jw.write(jsonBlob);
-              await jw.close();
-            } catch (je: any) {
-              if (je?.name !== "AbortError") {
-                const a2 = document.createElement("a");
-                a2.href = URL.createObjectURL(jsonBlob);
-                a2.download = savedName + "_세션.json"; a2.click();
-              }
-            }
-          }
-        }
-        return;
-      } catch (e: any) {
-        if (e?.name === "AbortError") return;
+      } else if (!window.confirm(`"${quickSaveHandleRef.current.name}" 파일에 저장할까요?\n(다른 내용으로 저장하려면 취소한 뒤 '문서 저장'으로 새 파일을 만드세요.)`)) {
+        return; // 취소 — 엉뚱한 파일을 덮어쓰는 사고 방지
       }
-    }
-    const a1 = document.createElement("a");
-    a1.href = URL.createObjectURL(docxBlob);
-    a1.download = name + ".docx"; a1.click();
-    if (withJson) {
-      await new Promise<void>(resolve => setTimeout(() => {
-        const a2 = document.createElement("a");
-        a2.href = URL.createObjectURL(jsonBlob);
-        a2.download = name + "_세션.json"; a2.click();
-        setTimeout(resolve, 500);
-      }, 300));
-    }
-  };
+      const writable = await quickSaveHandleRef.current.createWritable();
+      await writable.write(docxBlob);
+      await writable.close();
 
-  const saveSessionJson = async (name: string) => {
-    const sessionData = JSON.stringify({ version: 1, fileName, mode, rawText, lines, showTime });
-    const jsonBlob = new Blob([sessionData], { type: "application/json;charset=utf-8" });
-    if (hasFsApi) {
-      try {
-        const handle = await (window as any).showSaveFilePicker({
-          suggestedName: name + "_세션.json",
-          types: [{ description: "세션 파일", accept: { "application/json": [".json"] } }],
-        });
-        const writable = await handle.createWritable();
-        await writable.write(jsonBlob);
-        await writable.close();
-        return;
-      } catch (e: any) {
-        if (e?.name === "AbortError") return;
+      if (!quickSaveJsonHandleRef.current) {
+        const jsonName = (quickSaveHandleRef.current.name as string).replace(/\.docx$/i, "") + "_세션.json";
+        try {
+          // docx와 같은 폴더에 자동으로 만들기 (다시 안 물어봄)
+          const dir = await (quickSaveHandleRef.current as any).getParent();
+          quickSaveJsonHandleRef.current = await dir.getFileHandle(jsonName, { create: true });
+        } catch {
+          // getParent 미지원 환경이면 위치를 한 번만 물어봄
+          quickSaveJsonHandleRef.current = await (window as any).showSaveFilePicker({
+            suggestedName: jsonName,
+            types: [{ description: "세션 파일", accept: { "application/json": [".json"] } }],
+          });
+        }
       }
+      const jwritable = await quickSaveJsonHandleRef.current.createWritable();
+      await jwritable.write(jsonBlob);
+      await jwritable.close();
+
+      showToast(`💾 저장됨 (${quickSaveHandleRef.current.name} + 세션)`);
+    } catch (e: any) {
+      if (e?.name === "AbortError") return; // 사용자가 위치 선택을 취소함
+      // 파일이 이동/삭제되는 등 핸들이 무효화된 경우 — 다음 시도 때 위치를 다시 물어보도록 초기화
+      quickSaveHandleRef.current = null;
+      quickSaveJsonHandleRef.current = null;
+      showToast("❌ 저장 실패, 다시 눌러 위치를 다시 선택해주세요: " + (e?.message || "알 수 없는 오류"));
     }
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(jsonBlob);
-    a.download = name + "_세션.json";
-    a.click();
   };
+  // Ctrl+S 단축키(컴포넌트 상단의 keydown 리스너)가 항상 최신 quickSave를 호출하도록 ref로 동기화
+  const quickSaveRef = useRef(quickSave);
+  useEffect(() => { quickSaveRef.current = quickSave; });
 
   // ── 세션 불러오기 (JSON) ──────────────────────────────────────
   const loadSession = (f: File) => {
@@ -1245,6 +1601,7 @@ export default function Index() {
         setMode(data.mode || "raw");
         setShowTime(data.showTime || false);
         setLinesHistory([]);
+        setLinesRedoStack([]);
         if (!localStorage.getItem("gb_hint_session_audio")) {
           setTimeout(() => {
             setContextHint({
@@ -1264,6 +1621,62 @@ export default function Index() {
 
   const progress = duration ? (current / duration) * 100 : 0;
   const visibleLines = filterSpeaker === "ALL" ? lines : lines.filter(l => l.speaker === filterSpeaker);
+
+  // 지금 재생 중인 음성 위치에 해당하는 줄·문장 — 변환 때 받은 문장별 시간표(segTimeMapRef)로
+  // 현재 시간의 문장을 찾고, 그 문장 텍스트를 담고 있는 줄에 표시(표시 전용, 편집 로직 무관).
+  // 시간표가 없으면(세션 파일로 불러온 경우 등) 엉뚱한 곳을 가리키느니 표시하지 않는다.
+  const playingInfo = (() => {
+    if (!audioUrl || lines.length === 0 || (!playing && current === 0)) return null;
+    const segs = segTimeMapRef.current;
+    if (segs.length === 0) return null;
+    let seg: { t: number; text: string } | null = null;
+    let segIdx = -1;
+    for (let i = 0; i < segs.length; i++) { if (segs[i].t <= current + 0.001) { seg = segs[i]; segIdx = i; } else break; }
+    if (!seg) return null;
+    const norm = (s: string) => s.replace(/\(\d{2}:\d{2}\)\s*/g, "").replace(/\s+/g, " ").trim();
+    const probe = norm(seg.text).slice(0, 15);
+    if (probe.length < 6) return null; // 너무 짧은 발화("네." 등)는 오매칭 위험이 커서 표시 생략
+    const hit = lines.find(l => norm(l.text).includes(probe));
+    if (!hit) return null;
+    return { lineId: hit.id, segIdx, segText: seg.text };
+  })();
+  const playingLineId = playingInfo?.lineId ?? null;
+
+  // 형광펜: 재생 중인 문장 텍스트가 화면에서 차지하는 영역(사각형들)을 읽어와 반투명 덧칠.
+  // DOM을 바꾸지 않는 읽기 전용 오버레이 — contentEditable 편집과 충돌하지 않음.
+  const [playHlRects, setPlayHlRects] = useState<{ left: number; top: number; width: number; height: number }[]>([]);
+  const playingSegKey = playingInfo ? `${playingInfo.lineId}|${playingInfo.segIdx}` : null;
+  useEffect(() => {
+    const compute = () => {
+      try {
+        if (!playingInfo) { setPlayHlRects([]); return; }
+        const el = document.querySelector<HTMLElement>(`[data-line-id="${playingInfo.lineId}"]`);
+        if (!el) { setPlayHlRects([]); return; }
+        const segBody = playingInfo.segText.replace(/^\(\d{2}:\d{2}\)\s*/, "").trim();
+        const full = el.textContent || "";
+        const idx = full.indexOf(segBody);
+        if (idx < 0 || !segBody) { setPlayHlRects([]); return; }
+        // 문자 위치 → 실제 화면 영역: 줄 안 텍스트 노드들을 순회하며 Range를 만든다
+        const range = document.createRange();
+        let pos = 0, startSet = false, endSet = false;
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        let node: Node | null;
+        while ((node = walker.nextNode())) {
+          const len = node.textContent?.length ?? 0;
+          if (!startSet && idx < pos + len) { range.setStart(node, idx - pos); startSet = true; }
+          if (startSet && idx + segBody.length <= pos + len) { range.setEnd(node, idx + segBody.length - pos); endSet = true; break; }
+          pos += len;
+        }
+        if (!startSet || !endSet) { setPlayHlRects([]); return; }
+        setPlayHlRects(Array.from(range.getClientRects()).map(r => ({ left: r.left, top: r.top, width: r.width, height: r.height })));
+      } catch { setPlayHlRects([]); }
+    };
+    compute();
+    window.addEventListener("scroll", compute, true);
+    window.addEventListener("resize", compute);
+    return () => { window.removeEventListener("scroll", compute, true); window.removeEventListener("resize", compute); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playingSegKey]);
   const SPEAKER_TABS: { key: Speaker | "ALL"; label: string }[] = [
     { key: "ALL", label: "전체" }, { key: "C", label: "상" },
     { key: "P", label: "내" }, { key: "X", label: "제3자" }, { key: "E", label: "기타" },
@@ -1351,6 +1764,11 @@ export default function Index() {
               className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors
                 ${activeTab === "genogram" ? "bg-white text-[#2d1f0e] shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
               가계도
+            </button>
+            <button onClick={() => setActiveTab("cases")}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors
+                ${activeTab === "cases" ? "bg-white text-[#2d1f0e] shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
+              사례연구
             </button>
           </div>
         </div>
@@ -1907,7 +2325,7 @@ export default function Index() {
             🔧 문제해결
           </Button>
           <Button variant="ghost" size="icon" className="w-8 h-8" title="사용 안내 투어"
-            onClick={() => activeTab === "genogram" ? setGeoTourStep(0) : setTourStep(0)}>
+            onClick={() => activeTab === "genogram" ? setGeoTourStep(0) : activeTab === "cases" ? setCaseTourStep(0) : setTourStep(0)}>
             <HelpCircle className="w-4 h-4" />
           </Button>
           {/* 디버그 파일 복사 버튼 */}
@@ -1916,39 +2334,26 @@ export default function Index() {
               try {
                 const res = await fetch("http://127.0.0.1:5577/api/debug-log");
                 const data = await res.json();
-                await (window as any).electronAPI.clipboardWrite(data.content);
-                alert("디버그 파일이 클립보드에 복사됐어요!\n문의 시 붙여넣기(Ctrl+V)해서 보내주세요.");
-              } catch {
-                alert("복사에 실패했어요. %USERPROFILE%\\gongulbaki_debug.txt 파일을 직접 열어주세요.");
+                const content: string = data?.content || "";
+                if (!content) throw new Error("내용 없음");
+                const ta = document.createElement("textarea");
+                ta.value = content;
+                ta.style.cssText = "position:fixed;top:-9999px;left:-9999px;opacity:0;";
+                document.body.appendChild(ta);
+                ta.focus();
+                ta.select();
+                const ok = document.execCommand("copy");
+                document.body.removeChild(ta);
+                if (!ok) throw new Error("execCommand 실패");
+                showToast(`📋 복사됐어요 (${content.length}자) — Ctrl+V로 붙여넣기 하세요.`);
+              } catch (err: any) {
+                showToast("❌ 복사 실패: " + (err?.message || "알 수 없는 오류") + " — %USERPROFILE%\\gongulbaki_debug.txt 를 직접 열어주세요.");
               }
             }}>
             📋
           </Button>
         </div>
       </header>
-
-      {/* ── 새 작업 시작 모달 ── */}
-      {showNewRecordModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-2xl shadow-2xl px-8 py-7 flex flex-col gap-4 w-[340px]">
-            <div>
-              <p className="font-bold text-[15px] text-gray-800 mb-1">✅ 저장이 완료됐어요!</p>
-              <p className="text-xs text-gray-500 leading-relaxed">새 작업을 시작하시겠어요?<br />현재 내용은 모두 지워집니다.</p>
-            </div>
-            <div className="flex flex-col gap-2">
-              <Button
-                className="bg-[#3a6a4a] hover:bg-[#2d5a3a] text-white w-full h-11 text-sm"
-                onClick={() => { setShowNewRecordModal(false); newRecord(); }}>
-                새 작업 시작
-              </Button>
-              <Button variant="outline" className="w-full h-11 text-sm"
-                onClick={() => setShowNewRecordModal(false)}>
-                계속 편집
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── 오류 메시지 배너 (converting 상태와 별개로 유지) ── */}
       {!converting && errorMsg && (
@@ -1965,6 +2370,12 @@ export default function Index() {
 
       {/* ── 파일 선택 모달: 재생만 할지 변환할지 ── */}
       {/* ── 세션 저장 확인 모달 ── */}
+      {toastMsg && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] bg-gray-800 text-white text-sm px-5 py-2.5 rounded-xl shadow-lg pointer-events-none">
+          {toastMsg}
+        </div>
+      )}
+
       {showResumeSplitModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-2xl shadow-2xl px-8 py-7 flex flex-col gap-4 w-[340px]">
@@ -1972,13 +2383,14 @@ export default function Index() {
             <p className="text-xs text-gray-500 leading-relaxed">이어서 편집하시겠어요?<br />새로 시작하면 이전 분리 내용이 사라집니다.</p>
             <div className="flex flex-col gap-2">
               <Button className="bg-[#3a6a4a] hover:bg-[#2d5a3a] text-white w-full h-10 text-sm"
-                onClick={() => { setShowResumeSplitModal(false); setMode("split"); }}>
+                onClick={resumeSplitting}>
                 이어서 편집
               </Button>
               <Button variant="outline" className="w-full h-10 text-sm"
                 onClick={() => {
                   setShowResumeSplitModal(false);
                   setLinesWithHistory(() => [{ id: Date.now(), speaker: "C", index: 1, time: current, text: rawText.trim() }]);
+                  splitBaseLenRef.current = rawText.length;
                   setMode("split");
                 }}>
                 새로 시작
@@ -2020,7 +2432,7 @@ export default function Index() {
             </div>
             <div className="flex gap-2 mt-1">
               <Button className="flex-1 bg-[#3a6a4a] hover:bg-[#2d5a3a] text-white h-10 text-sm"
-                onClick={() => { setShowDocxSettingsModal(false); exportDocx(docxFontSize, docxLineSpacing); }}>
+                onClick={() => { setShowDocxSettingsModal(false); quickSave(); }}>
                 저장
               </Button>
               <Button variant="outline" className="flex-1 h-10 text-sm"
@@ -2028,40 +2440,6 @@ export default function Index() {
                 취소
               </Button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {showSessionModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-2xl shadow-2xl px-8 py-7 flex flex-col gap-4 w-[360px]">
-            <div>
-              <p className="font-bold text-[15px] text-gray-800 mb-2">💾 문서 저장</p>
-              <p className="text-xs text-gray-500 leading-relaxed">
-                저장 형식을 선택해주세요.<br />
-                <b>JSON</b>으로 저장하면 나중에 <b>세션 열기</b>로 불러와<br />
-                이어서 편집할 수 있습니다.
-              </p>
-            </div>
-            <div className="flex flex-col gap-2">
-              <Button
-                className="bg-[#3a6a4a] hover:bg-[#2d5a3a] text-white w-full h-11 text-sm"
-                onClick={() => {
-                  setShowSessionModal(false);
-                  if (pendingSaveDocxBlob) doSaveDocx(pendingSaveDocxBlob, pendingSaveName, false).then(() => setShowNewRecordModal(true));
-                }}>
-                📄 워드 저장 (.docx)
-              </Button>
-              <Button variant="outline" className="w-full h-11 text-sm border-[#3a6a4a] text-[#3a6a4a] hover:bg-[#f0f7f2]"
-                onClick={() => {
-                  setShowSessionModal(false);
-                  saveSessionJson(pendingSaveName).then(() => setShowNewRecordModal(true));
-                }}>
-                📋 JSON 파일 저장 <span className="text-[10px] text-gray-400 ml-1">✏️ 수정 가능</span>
-              </Button>
-            </div>
-            <button onClick={() => setShowSessionModal(false)}
-              className="text-xs text-gray-400 hover:text-gray-600 text-center mt-1">취소</button>
           </div>
         </div>
       )}
@@ -2127,6 +2505,17 @@ export default function Index() {
                 <span className="cursor-pointer gap-1"><Upload className="w-3.5 h-3.5" /> 파일 열기</span>
               </Button>
             </label>
+            <Button variant="outline" size="sm" className="gap-1 relative" data-tour="btn-analyze"
+              disabled={!(mode === "split" && lines.length > 0) && !analyzeOpen}
+              title={mode === "split" && lines.length > 0
+                ? "빈출 단어 정리 + 회기 요약 초안 (전부 이 PC 안에서만 작동)"
+                : "화자 분리를 먼저 완료해야 분석할 수 있어요"}
+              onClick={() => { setAnalyzeOpen(v => !v); setAnalyzeFresh(false); if (analyzeModelReady === null) checkAnalyzeStatus(); }}>
+              <BarChart3 className="w-3.5 h-3.5" /> 분석
+              {analyzeBusy && <span className="text-amber-600 font-medium">(분석 중…)</span>}
+              {analyzeFresh && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-red-500" />}
+              {analyzeBusy && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />}
+            </Button>
             <Button variant="outline" size="sm" onClick={newRecord} className="gap-1">
               <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 3v10M3 8h10"/></svg>
               새 작업
@@ -2141,7 +2530,8 @@ export default function Index() {
                 </span>
               </Button>
             </label>
-            <Button size="sm" onClick={() => setShowDocxSettingsModal(true)} data-tour="btn-save"
+            <Button size="sm" onClick={() => { if (quickSaveHandleRef.current) quickSave(); else setShowDocxSettingsModal(true); }}
+              data-tour="btn-save" title="처음엔 저장 위치를 물어보고, 이후로는 같은 파일에 덮어씁니다 (Ctrl+S)"
               className="gap-1 bg-[#3a6a4a] hover:bg-[#2d5a3a] text-white border-0">
               <Save className="w-3.5 h-3.5" /> 문서 저장
             </Button>
@@ -2167,9 +2557,222 @@ export default function Index() {
                   className="text-xs gap-1" title="실행 취소 (Undo)">
                   <Undo2 className="w-3.5 h-3.5" /> 되돌리기
                 </Button>
+                <Button size="sm" variant="outline" onClick={redoLines}
+                  disabled={linesRedoStack.length === 0}
+                  className="text-xs gap-1" title="다시 실행 (Redo)">
+                  <Redo2 className="w-3.5 h-3.5" /> 다시실행
+                </Button>
               </>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ── 이어하기 배너 + 편집 영역을 감싸는 relative 래퍼: 분석 패널이 이 위에 오버레이됨 ── */}
+      <div className="relative flex-1 flex flex-col min-h-0 overflow-hidden">
+
+      {/* ── 📊 분석 패널 (접힘 — 편집 영역을 밀어내지 않고 그 위에 펼쳐짐) ── */}
+      {activeTab === "transcribe" && analyzeOpen && (
+        <div className="absolute inset-0 z-20 bg-white shadow-lg border-b border-[#e5dccf] px-5 py-4 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
+            <h3 className="text-sm font-bold text-[#2d1f0e] flex items-center gap-1"><BarChart3 className="w-4 h-4" /> 분석</h3>
+            <span className="text-[11px] text-gray-400">빈출 단어 = 실제 집계 · 요약 = AI 초안(상담자 검토 필수) · 전부 이 PC 안에서만</span>
+            <div className="ml-auto flex items-center gap-1.5">
+              {analyzeBusy
+                ? <button onClick={stopAnalysis} className="px-3 py-1 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs font-bold">중지</button>
+                : <button onClick={() => runAnalysis()} className="px-3 py-1 rounded-lg bg-[#3a6a4a] hover:bg-[#2d5a3a] text-white text-xs font-bold">
+                    {analyzeWords || analyzeSummary ? "다시 분석" : "분석 시작"}
+                  </button>}
+              {(analyzeWords || analyzeSummary) && !analyzeBusy && (
+                <button onClick={saveAnalysis} className="px-3 py-1 rounded-lg border border-gray-300 text-xs text-gray-600 hover:bg-gray-50">결과 저장</button>
+              )}
+              <button onClick={() => setAnalyzeOpen(false)} className="px-2 py-1 rounded-lg text-gray-400 hover:text-gray-600 text-xs">접기 ▲</button>
+            </div>
+          </div>
+
+          {/* 진행/안내 */}
+          {(analyzeBusy || analyzeMsg) && (
+            <div className="flex items-center gap-2 text-xs text-[#7a6a55] mb-3">
+              {analyzeBusy && <span className="inline-block w-3.5 h-3.5 border-2 border-[#c9b99f] border-t-[#2d1f0e] rounded-full animate-spin" />}
+              {analyzeMsg || "분석 중..."}
+            </div>
+          )}
+
+          {/* 끝난 조각 요약 — 진행 중에 하나씩 쌓임, 완료 후에도 접어서 볼 수 있음 */}
+          {analyzeChunks.length > 0 && (
+            <div className="mb-3 border border-gray-200 rounded-lg overflow-hidden">
+              <button onClick={() => setShowChunks(v => !v)}
+                className="w-full flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-[#5a4630] bg-gray-50 hover:bg-gray-100 text-left">
+                {showChunks ? "▾" : "▸"} 조각별 요약 ({analyzeChunks.length}{analyzeChunks[0] ? `/${analyzeChunks[0].total}` : ""}개 완료)
+              </button>
+              {showChunks && (
+                <div className="max-h-64 overflow-y-auto divide-y divide-gray-100">
+                  {analyzeChunks.map((c) => (
+                    <div key={c.index} className="px-3 py-2">
+                      <p className="text-[10px] font-bold text-gray-400 mb-1">조각 {c.index}/{c.total}</p>
+                      <p className="text-xs leading-relaxed whitespace-pre-wrap text-gray-700">{c.text}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 요약 모델 없음 → 다운로드 안내 */}
+          {analyzeModelReady === false && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3 text-xs text-amber-800">
+              <p className="font-bold mb-1">요약 기능을 쓰려면 요약 모델(약 1.5GB) 1회 다운로드가 필요해요.</p>
+              <p className="mb-2 text-amber-600">빈출 단어 정리는 모델 없이도 작동합니다. 모델도 다른 프로그램처럼 이 PC에 저장될 뿐, 상담 내용은 어디로도 전송되지 않아요.</p>
+              {analyzeDownloading
+                ? <span>다운로드 중... {analyzeDlMb}MB / 1452MB</span>
+                : <button onClick={downloadAnalyzeModel} className="px-3 py-1 rounded bg-amber-500 hover:bg-amber-600 text-white font-bold">요약 모델 다운로드</button>}
+            </div>
+          )}
+
+          {/* 요약 */}
+          {analyzeSummary && (
+            <div className="mb-3">
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <span className="text-xs font-bold text-[#5a4630]">회기 요약 초안</span>
+                {summaryEdited && !editingSummary && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">수정됨</span>
+                )}
+                {analyzeLabeled ? (
+                  <div className="flex gap-1">
+                    {([["all", "전체"], ["nae", "내담자만"], ["sang", "상담자만"]] as const).map(([k, label]) => (
+                      <button key={k} onClick={() => switchAnalyzeScope(k)} disabled={analyzeBusy || editingSummary}
+                        className={`px-2 py-0.5 rounded-full text-[11px] border transition-colors ${analyzeScope === k
+                          ? "bg-[#3a6a4a] text-white border-[#3a6a4a]"
+                          : "bg-white text-gray-500 border-gray-200 hover:border-gray-400"}`}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-[11px] text-gray-400">화자 분리 후 다시 분석하면 내담자만/상담자만 요약도 가능해요</span>
+                )}
+                {!editingSummary && (
+                  <button
+                    onClick={() => { setSummaryDraft(analyzeSummary); setEditingSummary(true); }}
+                    className="ml-auto text-[11px] px-2 py-0.5 rounded-full border border-gray-200 text-gray-500 hover:bg-gray-100 flex items-center gap-1">
+                    <Pencil className="w-3 h-3" /> 수정
+                  </button>
+                )}
+              </div>
+              <p className="text-[11px] text-gray-400 mb-1.5">
+                요약은 AI가 작성한 초안이에요. 틀리거나 어색한 부분은 직접 고쳐서 저장할 수 있어요.
+              </p>
+              {editingSummary ? (
+                <div className="space-y-1.5">
+                  <textarea
+                    value={summaryDraft}
+                    onChange={(e) => setSummaryDraft(e.target.value)}
+                    rows={8}
+                    className="w-full bg-white border border-[#e5dccf] rounded-lg p-3 text-[13px] leading-relaxed text-[#2d1f0e] focus:outline-none focus:ring-1 focus:ring-[#a8d8a8]"
+                  />
+                  <div className="flex items-center gap-1.5 justify-end">
+                    <button onClick={() => setEditingSummary(false)}
+                      className="text-xs px-3 py-1.5 rounded-md border border-gray-200 hover:bg-gray-50 text-gray-600">
+                      취소
+                    </button>
+                    <button
+                      onClick={() => {
+                        analyzeScopeCacheRef.current[analyzeScope] = summaryDraft;
+                        setAnalyzeSummary(summaryDraft);
+                        setSummaryEdited(true);
+                        setEditingSummary(false);
+                        showToast("수정한 요약을 저장했어요.");
+                      }}
+                      className="text-xs px-3 py-1.5 rounded-md bg-[#3a6a4a] hover:bg-[#2d5a3a] text-white font-medium">
+                      저장
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-[#faf8f5] border border-[#e5dccf] rounded-lg p-3 text-[13px] leading-relaxed whitespace-pre-wrap text-[#2d1f0e]">
+                  {analyzeSummary}
+                </div>
+              )}
+              {analyzePartialsRef.current.length > 0 && (
+                <details className="mt-2 group" open>
+                  <summary className="cursor-pointer list-none flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#f2ece2] hover:bg-[#e8dcc8] text-[12px] font-semibold text-[#5a4630] transition-colors w-fit">
+                    <svg className="w-3 h-3 shrink-0 transition-transform group-open:rotate-90" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 4l4 4-4 4"/></svg>
+                    조각별 요약 보기 (참고용, {analyzePartialsRef.current.length}개)
+                  </summary>
+                  <div className="mt-1.5 space-y-2">
+                    {analyzePartialsRef.current.map((p, i) => (
+                      <div key={i} className="bg-white border border-gray-100 rounded-lg p-2.5 text-[12px] leading-relaxed whitespace-pre-wrap text-gray-500">
+                        {p}
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+          )}
+
+          {/* 빈출 단어 */}
+          {analyzeWords && (() => {
+            const wordScopes: [string, [string, number][]][] = [
+              ["전체", analyzeWords.overall],
+              ...Object.entries(analyzeWords.speakers || {}),
+            ];
+            const current = wordScopes.find(([label]) => label === wordScope) || wordScopes[0];
+            return (
+            <div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs font-bold text-[#5a4630]">빈출 단어</span>
+                <div className="flex gap-1">
+                  {wordScopes.map(([label]) => (
+                    <button key={label} onClick={() => setWordScope(label)}
+                      className={`px-2 py-0.5 rounded-full text-[11px] border transition-colors ${wordScope === label
+                        ? "bg-[#3a6a4a] text-white border-[#3a6a4a]"
+                        : "bg-white text-gray-500 border-gray-200 hover:border-gray-400"}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <span className="text-[11px] text-gray-400">단어를 누르면 실제로 말한 문장을 볼 수 있어요</span>
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {current[1].map(([w, n]) => (
+                  <button key={w} onClick={() => showWordSentences(w)}
+                    className="px-2 py-0.5 rounded-full bg-[#f2ece2] hover:bg-[#e8dcc8] text-[12px] text-[#2d1f0e] transition-colors cursor-pointer">
+                    {w} <b className="text-[#8a5a2a]">{n}</b>
+                  </button>
+                ))}
+                {current[1].length === 0 && <span className="text-[12px] text-gray-400">단어가 없어요.</span>}
+              </div>
+
+              {wordPreview && (
+                <div className="mt-2.5 bg-[#faf8f5] border border-[#e5dccf] rounded-lg p-3">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-xs font-bold text-[#5a4630]">'{wordPreview.word}'가 나온 문장</span>
+                    <button onClick={() => setWordPreview(null)} className="ml-auto text-[11px] text-gray-400 hover:text-gray-600">닫기 ✕</button>
+                  </div>
+                  <div className="space-y-1 max-h-[160px] overflow-y-auto">
+                    {wordPreview.sentences.length === 0
+                      ? <p className="text-[12px] text-gray-400">문장을 찾지 못했어요.</p>
+                      : wordPreview.sentences.map((s, i) => (
+                          <p key={i} className="text-[12px] text-[#2d1f0e] leading-relaxed">
+                            {s.split(wordPreview.word).map((part, j, arr) => (
+                              <Fragment key={j}>
+                                {part}
+                                {j < arr.length - 1 && <b className="text-[#8a5a2a] bg-[#f2ece2] rounded px-0.5">{wordPreview.word}</b>}
+                              </Fragment>
+                            ))}
+                          </p>
+                        ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            );
+          })()}
+
+          {!analyzeWords && !analyzeSummary && !analyzeBusy && analyzeModelReady !== false && (
+            <p className="text-xs text-gray-400">[분석 시작]을 누르면 현재 축어록의 빈출 단어와 회기 요약 초안을 만들어요.</p>
+          )}
         </div>
       )}
 
@@ -2234,6 +2837,11 @@ export default function Index() {
           <Genogram />
         </div>
 
+        {/* 사례서랍 탭 - 항상 마운트, display:none으로 상태 유지 */}
+        <div style={{ display: activeTab === "cases" ? "flex" : "none" }} className="flex-1 flex-col min-h-0 overflow-hidden">
+          <CaseDrawer />
+        </div>
+
         {/* 축어록 탭 - 항상 마운트, display:none으로 상태 유지 */}
         <div style={{ display: activeTab === "transcribe" ? "flex" : "none" }} className="flex-1 flex-col min-h-0 overflow-hidden">
           {mode === "raw" ? (
@@ -2243,18 +2851,79 @@ export default function Index() {
                   변환 결과를 확인하고 오타를 수정하세요. 완료 후 <b>화자 분리 시작</b>을 누르세요.
                 </p>
               </div>
-              <textarea value={rawText} onChange={e => setRawText(e.target.value)}
-                className="flex-1 w-full p-5 rounded-xl border border-gray-200 bg-white leading-relaxed text-[15px] outline-none resize-none shadow-sm"
-                placeholder="파일을 선택하면 변환 결과가 이곳에 실시간으로 채워집니다…" />
+              <div className="relative flex-1 min-h-0">
+                <textarea value={rawText} onChange={e => setRawText(e.target.value)}
+                  className="w-full h-full p-5 rounded-xl border border-gray-200 bg-white leading-relaxed text-[15px] outline-none resize-none shadow-sm"
+                  placeholder="파일을 선택하면 변환 결과가 이곳에 실시간으로 채워집니다…" />
+                {converting && !rawText.trim() && (
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none px-10">
+                    <div className="text-center space-y-3 animate-in fade-in duration-700 max-w-md">
+                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#e8f4e8] text-[#2d7a3a] text-sm font-bold" style={{ perspective: "200px" }}>
+                        <Hourglass className="w-3.5 h-3.5 shrink-0" />
+                        {"첫 변환 결과는 약 5~10분 후에 나와요".split("").map((ch, i) => (
+                          <span key={i} className="letter-spin" style={{ animationDelay: `${i * 60}ms` }}>
+                            {ch === " " ? " " : ch}
+                          </span>
+                        ))}
+                      </div>
+                      <p className="text-sm text-gray-400 leading-relaxed">
+                        전체 음성을 10분 단위 조각으로 나누어 순서대로 변환해요.<br />
+                        <span className="text-xs text-gray-300">(예: 2시간 분량이면 약 11개 조각으로 나뉘어요)</span><br />
+                        첫 번째 조각이 이 편집창에 채워지기 시작하면<br />
+                        <b className="text-gray-500">화자 분리 시작</b>을 눌러 오·탈자를 바로 수정하실 수 있어요.<br />
+                        편집하시는 동안에도 뒤에서 변환이 계속되고,<br />
+                        나머지 조각들이 이어서 채워집니다.
+                      </p>
+                      <p className="text-xs text-gray-300">
+                        문서 저장 시 폴더를 한 번 지정하면 워드(.docx)와 세션(.json) 두 가지로 저장되고,<br />
+                        이후 <b className="text-gray-400">Ctrl+S</b>만 누르면 같은 파일에 자동으로 계속 저장돼요.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             <div className="flex-1 overflow-y-auto p-4 min-h-0">
+              <style>{`
+                @keyframes gb-play-pulse { 0%,100% { opacity: .35; transform: scale(.85); } 50% { opacity: .8; transform: scale(1.15); } }
+              `}</style>
+              {/* 형광펜: 지금 재생 중인 문장 위에 반투명 덧칠 (읽기 전용 오버레이) */}
+              {playHlRects.map((r, i) => (
+                <div key={i} style={{
+                  position: "fixed", left: r.left - 1, top: r.top, width: r.width + 2, height: r.height,
+                  background: "rgba(253, 224, 71, 0.42)", borderRadius: 3,
+                  mixBlendMode: "multiply", pointerEvents: "none", zIndex: 30,
+                }} />
+              ))}
+              {/* 편집 커서 표식 — 두꺼운 세로 막대 + 위쪽 삼각형 (읽기 전용 오버레이) */}
+              {caretPos && (
+                <>
+                  <div style={{
+                    position: "fixed", left: caretPos.x - 1.5, top: caretPos.y - 1, zIndex: 40,
+                    width: 3, height: caretPos.h + 2, borderRadius: 2,
+                    background: "rgba(45, 122, 58, 0.85)", pointerEvents: "none",
+                  }} />
+                  <div style={{
+                    position: "fixed", left: caretPos.x - 6, top: caretPos.y - 10, zIndex: 40,
+                    width: 0, height: 0, pointerEvents: "none",
+                    borderLeft: "6px solid transparent", borderRight: "6px solid transparent",
+                    borderTop: "9px solid rgba(45, 122, 58, 0.85)",
+                  }} />
+                </>
+              )}
               <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-2 min-h-full overflow-hidden">
                 {visibleLines.map((l) => {
                   const col = speakerColor(l.speaker);
                   const tag = speakerLabel(l.speaker, l.index);
+                  const isPlayingLine = l.id === playingLineId;
                   return (
-                    <div key={l.id} className="group flex items-start gap-2">
+                    <div key={l.id} className="group relative flex items-start gap-2">
+                      {isPlayingLine && (
+                        <span title="지금 재생 중인 부분"
+                          className="absolute -left-4 top-3 w-2 h-2 rounded-full select-none"
+                          style={{ background: "#3a6a4a", animation: "gb-play-pulse 1.6s ease-in-out infinite" }} />
+                      )}
                       <button onClick={() => cycleSpeaker(l.id)}
                         className="shrink-0 w-12 h-7 rounded-full text-xs font-bold transition-all hover:scale-105 border mt-1"
                         style={{ background: col.bg, color: col.text, borderColor: col.border }}>
@@ -2264,8 +2933,8 @@ export default function Index() {
                         <div contentEditable suppressContentEditableWarning data-line-id={l.id}
                           onKeyDown={e => handleSplitKey(e, l.id)}
                           onBlur={e => updateText(l.id, e.currentTarget.textContent || "")}
-                          className="min-h-[1.8rem] px-3 py-1 rounded-lg leading-relaxed text-[15px] outline-none transition-colors break-words"
-                          style={{ background: col.bg + "55", borderLeft: `3px solid ${col.border}`, wordBreak: "break-word", overflowWrap: "break-word" }}>
+                          className="min-h-[1.8rem] px-3 py-1 rounded-lg leading-relaxed text-[15px] outline-none transition-colors break-words focus:ring-2 focus:ring-[#3a6a4a]/40 focus:shadow-sm"
+                          style={{ background: isPlayingLine ? col.bg : col.bg + "55", borderLeft: `3px solid ${col.border}`, wordBreak: "break-word", overflowWrap: "break-word", caretColor: "#2d7a3a" }}>
                           {l.text}
                         </div>
                       </div>
@@ -2286,6 +2955,7 @@ export default function Index() {
           )}
         </div>
       </div>
+      </div>
 
       {/* ── 하단 플레이어 (축어록 탭에서만) ── */}
       {activeTab === "transcribe" && (
@@ -2293,6 +2963,10 @@ export default function Index() {
         {/* 변환 진행 바 - 플레이어 바로 위 */}
         {converting && (
           <div className="flex items-center gap-3 px-5 py-1.5 bg-[#f7f5f0] border-b border-gray-100">
+            <span key={jamoIdx} className="inline-block w-4 text-center shrink-0 text-xs font-bold text-[#c8a84b] animate-in fade-in zoom-in duration-300"
+              title="변환이 진행 중이에요 (멈춘 게 아니에요)">
+              {JAMO_CYCLE[jamoIdx]}
+            </span>
             <span className="text-[11px] text-gray-500 shrink-0 min-w-[160px]">{convertStatus}</span>
             <div className="flex-1 bg-gray-200 rounded-full h-1 overflow-hidden">
               <div className="h-full rounded-full transition-all duration-500"
@@ -2409,6 +3083,25 @@ export default function Index() {
           }}
           onPrev={() => setGeoTourStep(s => Math.max(0, s - 1))}
           onClose={() => { localStorage.setItem("gb_geo_tour_done", "1"); setGeoTourStep(-1); }}
+        />
+      )}
+
+      {/* ── 사례서랍 투어 ── */}
+      {caseTourStep >= 0 && caseTourStep < CASE_DRAWER_TOUR_STEPS.length && (
+        <TourOverlay
+          step={CASE_DRAWER_TOUR_STEPS[caseTourStep]}
+          stepIndex={caseTourStep}
+          total={CASE_DRAWER_TOUR_STEPS.length}
+          onNext={() => {
+            if (caseTourStep >= CASE_DRAWER_TOUR_STEPS.length - 1) {
+              localStorage.setItem("gb_case_tour_done", "1");
+              setCaseTourStep(-1);
+            } else {
+              setCaseTourStep(s => s + 1);
+            }
+          }}
+          onPrev={() => setCaseTourStep(s => Math.max(0, s - 1))}
+          onClose={() => { localStorage.setItem("gb_case_tour_done", "1"); setCaseTourStep(-1); }}
         />
       )}
 

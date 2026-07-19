@@ -13,6 +13,9 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
+    // 이 앱은 Electron 36(크로미움 130대) 안에서만 구동 — pdf.js 4.x의
+    // top-level await 때문에 기본 타깃(chrome87)으로는 빌드가 거부된다.
+    target: "chrome120",
     rollupOptions: {
       output: {
         entryFileNames: "assets/index.js",

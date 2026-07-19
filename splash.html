@@ -195,24 +195,18 @@
 </style>
 
 <div id="download-overlay">
-  <div id="dl-title">🔽 AI 음성 변환 모델 준비 중...</div>
+  <div id="dl-title">🔽 AI 모델 준비 중...</div>
   <div id="dl-subtitle">처음 한 번만 다운로드합니다. 잠시만 기다려주세요.</div>
-  <div class="dl-model-row" id="row-small">
-    <div class="dl-model-label">Small (약 250MB)</div>
-    <div class="dl-bar-wrap"><div class="dl-bar" id="bar-small"></div></div>
-    <div class="dl-status" id="status-small">대기</div>
-  </div>
   <div class="dl-model-row" id="row-medium">
-    <div class="dl-model-label">Medium (약 750MB)</div>
+    <div class="dl-model-label">음성 변환 · Whisper large-v3-turbo (약 1.6GB)</div>
     <div class="dl-bar-wrap"><div class="dl-bar" id="bar-medium"></div></div>
     <div class="dl-status" id="status-medium">대기</div>
   </div>
-  <div class="dl-model-row" id="row-large">
-    <div class="dl-model-label">Large (약 6GB)</div>
-    <div class="dl-bar-wrap"><div class="dl-bar" id="bar-large"></div></div>
-    <div class="dl-status" id="status-large">대기</div>
+  <div class="dl-model-row" id="row-llm" style="display:none">
+    <div class="dl-model-label">회기 요약 · Kanana (약 1.5GB)</div>
+    <div class="dl-bar-wrap"><div class="dl-bar" id="bar-llm"></div></div>
+    <div class="dl-status" id="status-llm">대기</div>
   </div>
-  <div id="dl-overall">전체 0 / 3 완료</div>
 </div>
 
 <script>
@@ -223,121 +217,110 @@
     });
   }
 
-  // 서버 준비 완료 신호 수신
+  // 서버 준비 완료 신호 수신 — 음성 변환 모델과 요약 모델을 차례로 준비
   if (window.electronAPI && window.electronAPI.onStartDownload) {
     window.electronAPI.onStartDownload(async () => {
 
-      // ① 어떤 엔진이든 모델이 하나라도 있는지 확인
-      let anyModelCached = false;
+      // ① 두 모델이 이미 있는지 확인
+      let turboCached = false, llmCached = false;
       try {
-        const [r1, r2] = await Promise.all([
-          fetch('http://127.0.0.1:5577/api/models/status'),
-          fetch('http://127.0.0.1:5577/api/models/cpp/status'),
-        ]);
-        const d1 = await r1.json();
-        const d2 = await r2.json();
-        anyModelCached =
-          Object.values(d1).some(m => m.cached) ||
-          Object.values(d2).some(m => m.cached);
-      } catch(e) {
-        anyModelCached = false;
-      }
-
-      // ② 모델이 하나라도 있으면 → 바로 메인창
-      if (anyModelCached) {
-        if (window.electronAPI && window.electronAPI.modelsReady) {
-          window.electronAPI.modelsReady();
-        }
-        return;
-      }
-
-      // ③ 아무 모델도 없으면 → 다운로드 UI 표시 후 미디엄만 다운로드
-      const overlay = document.getElementById('download-overlay');
-      overlay.classList.add('show');
-
-      // 스몰/라지 행은 숨김 (최초엔 미디엄만)
-      document.getElementById('row-small').style.display = 'none';
-      document.getElementById('row-large').style.display = 'none';
-      document.getElementById('dl-overall').style.display = 'none';
-
-      const bar = document.getElementById('bar-medium');
-      const status = document.getElementById('status-medium');
-
-      // 진행바 초기화
-      bar.style.width = '5%';
-      bar.style.transition = 'width 3s ease-out';
-      status.textContent = '다운 중';
-
-      let pingCount = 0;
-      let finished = false;
+        const r = await fetch('http://127.0.0.1:5577/api/models/cpp/status');
+        const d = await r.json();
+        turboCached = !!(d['large-v3-turbo'] && d['large-v3-turbo'].cached);
+      } catch(e) { turboCached = false; }
+      try {
+        const r = await fetch('http://127.0.0.1:5577/api/analyze/status');
+        const d = await r.json();
+        llmCached = !!d.llm_model;
+      } catch(e) { llmCached = false; }
 
       function goToMain() {
-        if (finished) return;
-        finished = true;
-        clearInterval(timeoutTimer);
         if (window.electronAPI && window.electronAPI.modelsReady) {
           window.electronAPI.modelsReady();
         }
       }
 
-      // 30분 타임아웃 — 네트워크 문제 등으로 무한정 멈출 경우 자동 진행
-      const timeoutTimer = setInterval(() => {
-        if (!finished) {
-          clearInterval(timeoutTimer);
-          es.close();
-          status.textContent = '⏱️ 시간 초과';
-          document.getElementById('dl-subtitle').textContent = '다운로드가 오래 걸리고 있어요. 앱을 시작합니다.';
-          setTimeout(goToMain, 2000);
-        }
-      }, 10 * 60 * 1000);
+      // ② 둘 다 있으면 → 바로 메인창
+      if (turboCached && llmCached) { goToMain(); return; }
 
-      const es = new EventSource('http://127.0.0.1:5577/api/models/download/medium');
+      // ③ 없는 것만 줄을 보여주고 차례로 다운로드
+      document.getElementById('download-overlay').classList.add('show');
+      if (turboCached) document.getElementById('row-medium').style.display = 'none';
+      if (!llmCached) document.getElementById('row-llm').style.display = '';
 
-      es.onmessage = (e) => {
-        const data = JSON.parse(e.data);
-        if (data.type === 'ping') {
-          // 이전 버전 호환용 (서버가 progress 미지원 시)
-          pingCount++;
-          const progress = Math.min(92, 5 + pingCount * 1.5);
-          bar.style.transition = 'width 4s ease-out';
-          bar.style.width = progress + '%';
-          return;
-        }
-        if (data.type === 'progress') {
-          // 실제 진행률 표시
-          const p = data.progress || 0;
-          bar.style.transition = 'width 2.5s ease-out';
-          bar.style.width = Math.max(p, parseInt(bar.style.width) || 0) + '%';
-          return;
-        }
-        if (data.type === 'start') {
-          bar.style.transition = 'width 2s ease-out';
+      // 한 모델의 SSE 다운로드를 Promise로 감싼 공용 함수.
+      // 실패해도 앱은 시작한다(설정에서 재다운 가능) — resolve만 하고 reject 안 함.
+      function downloadOne(url, barId, statusId) {
+        return new Promise((resolve) => {
+          const bar = document.getElementById(barId);
+          const status = document.getElementById(statusId);
           bar.style.width = '5%';
+          bar.style.transition = 'width 3s ease-out';
           status.textContent = '다운 중';
-        } else if (data.type === 'done') {
-          clearInterval(timeoutTimer);
-          bar.className = 'dl-bar done';
-          bar.style.transition = 'width 0.5s ease-out';
-          bar.style.width = '100%';
-          status.textContent = '✓ 완료';
-          es.close();
-          document.getElementById('dl-title').textContent = '✅ 준비 완료!';
-          document.getElementById('dl-subtitle').textContent = '곤글박이를 시작합니다...';
-          setTimeout(goToMain, 800);
-        } else if (data.type === 'error') {
-          clearInterval(timeoutTimer);
-          es.close();
-          status.textContent = '❌ 오류';
-          document.getElementById('dl-subtitle').textContent = '오류가 발생했습니다. 앱을 시작하고 설정에서 다시 다운로드해주세요.';
-          setTimeout(goToMain, 3000);
-        }
-      };
 
-      es.onerror = () => {
-        if (finished) return;
-        es.close();
-        setTimeout(goToMain, 1500);
-      };
+          let pingCount = 0;
+          let settled = false;
+          function finish(ok) {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeoutTimer);
+            try { es.close(); } catch(e) {}
+            if (ok) {
+              bar.className = 'dl-bar done';
+              bar.style.transition = 'width 0.5s ease-out';
+              bar.style.width = '100%';
+              status.textContent = '✓ 완료';
+            }
+            resolve(ok);
+          }
+
+          // 30분 타임아웃 — 네트워크 문제로 무한정 멈출 경우 다음 단계로
+          const timeoutTimer = setTimeout(() => {
+            status.textContent = '⏱️ 시간 초과';
+            finish(false);
+          }, 30 * 60 * 1000);
+
+          const es = new EventSource(url);
+          es.onmessage = (e) => {
+            const data = JSON.parse(e.data);
+            if (data.type === 'ping') {
+              pingCount++;
+              bar.style.transition = 'width 4s ease-out';
+              bar.style.width = Math.min(92, 5 + pingCount * 1.5) + '%';
+            } else if (data.type === 'progress') {
+              // cpp 모델은 progress(%) / 요약 모델은 done_mb·total_mb로 옴
+              let p = data.progress;
+              if (p === undefined && data.total_mb) p = Math.round((data.done_mb || 0) / data.total_mb * 100);
+              bar.style.transition = 'width 2.5s ease-out';
+              bar.style.width = Math.min(99, Math.max(p || 0, parseInt(bar.style.width) || 0)) + '%';
+            } else if (data.type === 'start') {
+              bar.style.transition = 'width 2s ease-out';
+              bar.style.width = '5%';
+              status.textContent = '다운 중';
+            } else if (data.type === 'done') {
+              finish(true);
+            } else if (data.type === 'error') {
+              status.textContent = '❌ 오류';
+              finish(false);
+            }
+          };
+          es.onerror = () => { finish(false); };
+        });
+      }
+
+      let allOk = true;
+      if (!turboCached) {
+        allOk = (await downloadOne('http://127.0.0.1:5577/api/models/cpp/download/large-v3-turbo', 'bar-medium', 'status-medium')) && allOk;
+      }
+      if (!llmCached) {
+        allOk = (await downloadOne('http://127.0.0.1:5577/api/analyze/model/download', 'bar-llm', 'status-llm')) && allOk;
+      }
+
+      document.getElementById('dl-title').textContent = allOk ? '✅ 준비 완료!' : '⚠️ 일부 모델을 받지 못했어요';
+      document.getElementById('dl-subtitle').textContent = allOk
+        ? '곤글박이를 시작합니다...'
+        : '앱 시작 후 설정에서 다시 다운로드할 수 있어요. 곤글박이를 시작합니다...';
+      setTimeout(goToMain, allOk ? 800 : 2500);
     });
   }
 </script>

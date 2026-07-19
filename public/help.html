@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>곤글박이 — 문제 해결 안내</title>
+<title>곤글박이 — 사용설명서 · 문제 해결</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -20,7 +20,7 @@
     display: flex; align-items: center; gap: 14px;
     padding-bottom: 1.25rem;
     border-bottom: 1px solid #e5e0d8;
-    margin-bottom: 2rem;
+    margin-bottom: 1.25rem;
     justify-content: space-between;
   }
   .logo {
@@ -31,6 +31,35 @@
   .header-title { font-size: 17px; font-weight: 700; color: #1a1a1a; }
   .header-sub { font-size: 12px; color: #888; margin-top: 2px; }
 
+  /* 검색 */
+  .search-box {
+    position: relative; margin-bottom: 1rem;
+  }
+  .search-box input {
+    width: 100%; font-size: 13.5px; padding: 11px 14px 11px 38px;
+    border: 1.5px solid #dcd5c8; border-radius: 10px; background: #fff;
+    font-family: inherit; color: #1a1a1a;
+  }
+  .search-box input:focus { outline: none; border-color: #3a6a4a; }
+  .search-box .icon { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: #999; font-size: 14px; }
+  .search-clear {
+    position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+    background: none; border: none; color: #aaa; font-size: 13px; cursor: pointer; display: none;
+  }
+  .search-clear.show { display: block; }
+
+  /* 자주 묻는 질문 버튼 */
+  .faq-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 1.5rem; }
+  .faq-chip {
+    font-size: 11.5px; padding: 6px 11px; border-radius: 999px;
+    background: #fff; border: 1px solid #e5e0d8; color: #555; cursor: pointer;
+    font-family: inherit; transition: all 0.12s;
+  }
+  .faq-chip:hover { background: #f0f7f2; border-color: #3a6a4a; color: #2d5a3a; }
+
+  .no-result { display: none; text-align: center; color: #aaa; font-size: 13px; padding: 2rem 0; }
+  .no-result.show { display: block; }
+
   /* 탭 */
   .tab-bar {
     display: flex; gap: 4px;
@@ -38,9 +67,10 @@
     margin-bottom: 1.5rem;
   }
   .tab {
-    flex: 1; text-align: center; font-size: 13px; font-weight: 600;
+    flex: 1; text-align: center; font-size: 12.5px; font-weight: 600;
     padding: 8px 0; border-radius: 7px; cursor: pointer;
     color: #888; background: transparent; border: none; transition: all 0.15s;
+    font-family: inherit;
   }
   .tab.active { background: #fff; color: #1a1a1a; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
 
@@ -49,6 +79,7 @@
     font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
     color: #aaa; text-transform: uppercase; margin: 1.75rem 0 0.6rem;
   }
+  .section-label:first-child { margin-top: 0; }
 
   /* 카드 */
   .card {
@@ -68,6 +99,7 @@
   .badge-red   { background: #fdeaea; color: #b03030; }
   .badge-amber { background: #fef3e2; color: #9a5500; }
   .badge-teal  { background: #e2f5ec; color: #1a7a4a; }
+  .badge-blue  { background: #e6f0fb; color: #1a5fa0; }
   .card-title  { font-size: 13.5px; font-weight: 600; color: #1a1a1a; flex: 1; }
   .chevron     { font-size: 12px; color: #bbb; transition: transform 0.2s; flex-shrink: 0; }
   .chevron.open { transform: rotate(180deg); }
@@ -77,6 +109,10 @@
 
   .symptom { font-size: 12px; color: #777; margin: 12px 0 8px; }
   .symptom b { color: #333; }
+
+  .plain { font-size: 13px; color: #444; line-height: 1.75; padding-top: 12px; white-space: pre-line; }
+  .plain b { color: #1a1a1a; }
+  .plain em { color: #3a6a4a; font-style: normal; font-weight: 600; }
 
   /* 단계 목록 */
   .step-list { list-style: none; counter-reset: s; }
@@ -151,24 +187,37 @@
 
   <div class="header">
     <div style="display:flex;align-items:center;gap:14px;">
-    <img src="data:image/png;base64,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" alt="곤글박이 로고" style="width:auto;height:48px;object-fit:contain;flex-shrink:0;mix-blend-mode:multiply;" />
+    <img src="assets/gongulbaki-logo.png" alt="곤글박이 로고" style="width:auto;height:48px;object-fit:contain;flex-shrink:0;mix-blend-mode:multiply;" />
     <div>
-      <div class="header-title">곤글박이 — 문제 해결 안내</div>
-      <div class="header-sub">변환이 안 될 때 단계별로 확인해보세요</div>
+      <div class="header-title">곤글박이 — 사용설명서 · 문제 해결</div>
+      <div class="header-sub">궁금한 것을 검색하거나, 아래 자주 묻는 질문을 눌러보세요</div>
     </div>
     </div>
     <button class="copy-debug-btn" onclick="copyDebugLog()">
-      📋 디버그 로그 복사
+      디버그 로그 복사
     </button>
   </div>
 
-  <div class="tab-bar">
-    <button class="tab active" onclick="switchTab('general')">일반 PC 문제</button>
-    <button class="tab" onclick="switchTab('secure')">보안·기관 PC 문제</button>
+  <div class="search-box">
+    <span class="icon">🔍</span>
+    <input id="searchInput" type="text" placeholder="예: 저장, 사례서랍, 반복, 요약, 비밀번호..." oninput="onSearch()" />
+    <button class="search-clear" id="searchClear" onclick="clearSearch()">✕</button>
   </div>
 
+  <div class="faq-row" id="faqRow"></div>
+  <div class="no-result" id="noResult">검색 결과가 없어요. 다른 낱말로 찾아보시거나, 아래 문제 해결 탭을 확인해보세요.</div>
+
+  <div class="tab-bar">
+    <button class="tab active" id="tabbtn-usage" onclick="switchTab('usage')">사용법</button>
+    <button class="tab" id="tabbtn-general" onclick="switchTab('general')">일반 PC 문제</button>
+    <button class="tab" id="tabbtn-secure" onclick="switchTab('secure')">보안·기관 PC 문제</button>
+  </div>
+
+  <!-- ══════════════════════════════════════════ 사용법 (위키 기반, 검색 대상) -->
+  <div id="panel-usage" class="panel active"></div>
+
   <!-- ══════════════════════════════════════════ 일반 PC -->
-  <div id="panel-general" class="panel active">
+  <div id="panel-general" class="panel">
 
     <div class="section-label">변환이 안 될 때</div>
 
@@ -179,11 +228,10 @@
         <span class="chevron">▼</span>
       </div>
       <div class="card-body">
-        <div class="symptom"><b>증상:</b> 버튼을 눌렀는데 로딩도 없고 텍스트도 안 나옴</div>
+        <div class="symptom"><b>증상:</b> 파일을 선택했는데 로딩도 없고 텍스트도 안 나옴</div>
         <ul class="step-list">
-          <li>설정(⚙) → <b>변환 엔진</b>을 확인해주세요. <em>faster-whisper</em> 또는 <em>whisper.cpp</em> 중 하나여야 해요.</li>
-          <li>선택한 엔진의 <b>모델이 설치되어 있는지</b> 확인하세요. 설치 안 된 모델로는 시작이 안 돼요.</li>
-          <li>whisper.cpp 엔진이 선택되어 있다면 → <b>faster-whisper로 바꿔서</b> 다시 시도해보세요.</li>
+          <li>설정(⚙) → <b>변환 엔진</b>이 다운로드되어 있는지 확인하세요 (large-v3-turbo, 약 1.6GB).</li>
+          <li>모델이 없다면 설정 화면의 다운로드 버튼으로 받아주세요. 다운로드가 끝나야 변환이 시작돼요.</li>
           <li>그래도 안 되면 앱을 완전히 종료 후 다시 실행해주세요.</li>
         </ul>
         <div class="tip">💡 설정을 바꾼 적 없는데 안 된다면 앱 재실행을 먼저 해보세요.</div>
@@ -199,10 +247,9 @@
       <div class="card-body">
         <div class="symptom"><b>증상:</b> 텍스트가 나오다가 멈추고 더 이상 진행 안 됨</div>
         <ul class="step-list">
-          <li>화면에 <b>'이어서 변환' 버튼</b>이 나타나면 눌러주세요. 멈춘 지점부터 이어서 변환할 수 있어요.</li>
-          <li>파일이 1시간 이상이면 <b>30분 이하로 잘라서</b> 순서대로 변환해보세요.</li>
-          <li>RAM이 8GB 이하라면 설정에서 <b>Small 모델</b>로 바꿔서 시도해보세요.</li>
-          <li>크롬, 한글 등 다른 프로그램을 모두 닫고 다시 시도해보세요.</li>
+          <li>화면에 <b>'이어서 변환' 배너</b>가 나타나면 같은 음성 파일을 다시 선택해주세요. 멈춘 지점부터 이어서 변환돼요.</li>
+          <li>절전 모드로 컴퓨터가 잠들면서 중단됐을 가능성이 높아요. 변환 중에는 절전이 안 되게 설정해두면 좋아요.</li>
+          <li>크롬, 한글 등 다른 무거운 프로그램을 모두 닫고 다시 시도해보세요.</li>
         </ul>
       </div>
     </div>
@@ -223,6 +270,23 @@
       </div>
     </div>
 
+    <div class="section-label">변환 결과 문제</div>
+
+    <div class="card">
+      <div class="card-header" onclick="toggle(this)">
+        <span class="badge badge-teal">참고</span>
+        <span class="card-title">같은 문장이 반복돼서 나와요</span>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="symptom"><b>증상:</b> 특정 구간부터 같은 말이 계속 반복됨 (긴 침묵 구간 근처에서 자주 발생)</div>
+        <ul class="step-list">
+          <li>2026년 7월 업데이트로 무음 제거·반복 필터가 적용돼 크게 줄었어요. 최신 설치파일인지 확인해보세요.</li>
+          <li>그래도 심하면 디버그 로그를 복사해 문의해주세요 (음성·변환 내용은 로그에 포함되지 않아요).</li>
+        </ul>
+      </div>
+    </div>
+
     <div class="section-label">모델 · 다운로드 문제</div>
 
     <div class="card">
@@ -232,11 +296,11 @@
         <span class="chevron">▼</span>
       </div>
       <div class="card-body">
-        <div class="symptom"><b>증상:</b> 첫 실행 시 다운로드 화면에서 멈추거나 오류</div>
+        <div class="symptom"><b>증상:</b> 다운로드 화면에서 멈추거나 오류</div>
         <ul class="step-list">
-          <li><b>인터넷 연결</b>을 확인해주세요. 첫 실행 시 약 1.5GB 다운로드가 필요해요.</li>
+          <li><b>인터넷 연결</b>을 확인해주세요. 변환 모델만 약 1.6GB, 요약 모델까지 받으면 추가 2.4GB가 필요해요.</li>
           <li>VPN이 켜져 있다면 <b>VPN을 끄고</b> 다시 시도해보세요.</li>
-          <li>C드라이브에 <b>3GB 이상 여유 공간</b>이 있는지 확인해주세요.</li>
+          <li>C드라이브에 <b>5GB 이상 여유 공간</b>이 있는지 확인해주세요.</li>
           <li>다운로드가 중간에 끊겼다면 앱을 재실행하면 이어서 다운로드돼요.</li>
         </ul>
         <div class="tip">💡 다운로드가 완료되면 이후엔 인터넷 없이 사용 가능해요.</div>
@@ -252,11 +316,42 @@
       <div class="card-body">
         <div class="symptom"><b>증상:</b> 변환은 되는데 실시간의 3배 이상 시간이 걸림</div>
         <ul class="step-list">
-          <li>설정에서 모델을 <b>Small</b>로 바꿔보세요. Medium보다 2~3배 빨라요.</li>
           <li>변환 중 다른 무거운 프로그램은 모두 종료해주세요.</li>
-          <li>파일을 <b>15~20분 단위로 나눠서</b> 변환하면 더 안정적이에요.</li>
+          <li>CPU 코어가 2개 이하인 저사양 PC라면 원래 느릴 수 있어요 — 변환 시작 시 안내 메시지를 확인해주세요.</li>
         </ul>
-        <div class="tip">💡 NVIDIA GPU가 있는 PC는 자동으로 GPU가 사용돼요. GPU 드라이버가 최신인지 확인해보세요.</div>
+        <div class="tip">💡 일반적인 데스크탑 CPU 기준 60분 녹음이 약 30분에 변환됩니다.</div>
+      </div>
+    </div>
+
+    <div class="section-label">분석 · 사례서랍 문제</div>
+
+    <div class="card">
+      <div class="card-header" onclick="toggle(this)">
+        <span class="badge badge-teal">참고</span>
+        <span class="card-title">분석 버튼이 눌러지지 않아요</span>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="symptom"><b>증상:</b> 📊 분석 버튼이 비활성화 상태</div>
+        <ul class="step-list">
+          <li><b>화자 분리를 먼저 완료</b>해야 분석 버튼이 활성화돼요.</li>
+          <li>요약까지 쓰려면 설정에서 요약 모델(2.4GB)을 받아야 해요. 안 받아도 빈출 단어는 사용 가능해요.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" onclick="toggle(this)">
+        <span class="badge badge-teal">참고</span>
+        <span class="card-title">사례서랍 비밀번호를 잊었어요</span>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="card-body">
+        <div class="symptom"><b>증상:</b> 잠금 화면에서 비밀번호가 기억나지 않음</div>
+        <ul class="step-list">
+          <li>잠금 화면의 <b>"비밀번호를 잊으셨나요?"</b> → 재설정을 눌러주세요.</li>
+          <li>이 비밀번호는 파일을 암호화하는 게 아니라 여는 관문이라, 재설정해도 <b>데이터 손실은 없어요</b>.</li>
+        </ul>
       </div>
     </div>
 
@@ -278,27 +373,9 @@
         <ul class="step-list">
           <li><b>백신·보안 프로그램</b>이 내부 실행파일을 차단하고 있을 수 있어요. 백신을 열어 <em>차단된 항목</em> 또는 <em>격리된 파일</em>을 확인해보세요.</li>
           <li>백신에서 곤글박이 설치 폴더 전체를 <b>검사 예외(화이트리스트)</b>에 추가해보세요.</li>
-          <li>설정(⚙) → 엔진을 <b>faster-whisper</b>로 바꿔보세요. whisper.cpp보다 차단될 가능성이 낮아요.</li>
           <li>그래도 안 되면 <b>IT 담당자에게</b> 실행 권한을 요청하거나 개인 노트북 사용을 권장드려요.</li>
         </ul>
         <div class="warn">⚠️ 기관 PC는 외부 실행파일 실행 자체가 정책으로 막혀 있는 경우가 있어요.</div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-header" onclick="toggle(this)">
-        <span class="badge badge-red">높은 가능성</span>
-        <span class="card-title">whisper.cpp 엔진으로 변환하면 아무 반응이 없어요</span>
-        <span class="chevron">▼</span>
-      </div>
-      <div class="card-body">
-        <div class="symptom"><b>증상:</b> whisper.cpp 엔진 선택 후 변환 시도 시 무반응</div>
-        <ul class="step-list">
-          <li>파일 탐색기에서 <span class="code">C:\whisper-models</span> 폴더가 있는지 확인해보세요.</li>
-          <li>없다면 직접 만들어보세요. <b>권한 오류</b>가 뜨면 C드라이브 쓰기 권한이 없는 것이에요.</li>
-          <li>이 경우 설정에서 <b>faster-whisper 엔진</b>으로 전환하면 해결돼요. faster-whisper는 이 경로를 사용하지 않아요.</li>
-        </ul>
-        <div class="tip">💡 faster-whisper 엔진은 C드라이브 루트 폴더를 사용하지 않아요.</div>
       </div>
     </div>
 
@@ -329,7 +406,7 @@
         <div class="symptom"><b>증상:</b> 다운로드 화면에서 아무 진행도 없음</div>
         <ul class="step-list">
           <li>기관 네트워크는 외부 대용량 다운로드를 차단하는 경우가 있어요.</li>
-          <li><b>스마트폰 핫스팟</b>으로 바꿔서 다운로드해보세요. 약 1.5GB 데이터가 필요해요.</li>
+          <li><b>스마트폰 핫스팟</b>으로 바꿔서 다운로드해보세요. 변환 모델만 약 1.6GB예요.</li>
           <li>다운로드 완료 후에는 인터넷 없이 사내 네트워크에서도 변환 가능해요.</li>
         </ul>
         <div class="tip">💡 AI 모델은 최초 1회만 다운로드하면 돼요.</div>
@@ -345,12 +422,10 @@
       <div class="card-body">
         <div class="symptom"><b>증상:</b> 변환이 매우 느리거나 중간에 앱이 멈춤</div>
         <ul class="step-list">
-          <li>설정에서 모델을 <b>Small</b>로 바꿔주세요. 메모리 사용량이 크게 줄고 속도가 빨라져요.</li>
           <li>변환 전 크롬, 한글 등 다른 앱을 모두 종료해주세요.</li>
-          <li>파일을 <b>15~20분 단위로 나눠서</b> 순서대로 변환하는 것을 권장해요.</li>
           <li>변환 중 PC를 다른 용도로 사용하지 마세요.</li>
+          <li>CPU 코어가 2개 이하면 변환 시작 시 저사양 안내가 표시돼요 — 시간이 걸려도 정상 작동이니 기다려주세요.</li>
         </ul>
-        <div class="warn">⚠️ 10년 이상 된 노트북에서 1시간 녹음 변환 시 2~3시간이 걸릴 수 있어요. Small 모델 사용 시 30~60분으로 단축 가능해요.</div>
       </div>
     </div>
 
@@ -358,8 +433,8 @@
 
   <!-- ══════════════════════════════════════════ 디버그 파일 -->
   <div class="debug-box">
-    <h3>📋 문제가 해결되지 않을 때 — 디버그 파일</h3>
-    <p>곤글박이는 오류 발생 시 자동으로 디버그 파일을 만들어요. 이 파일을 프로그램 배포자에게 전달하면 원인 파악에 도움이 돼요.</p>
+    <h3>문제가 해결되지 않을 때 — 디버그 파일</h3>
+    <p>곤글박이는 오류 발생 시 자동으로 디버그 파일을 만들어요. 이 파일을 프로그램 배포자에게 전달하면 원인 파악에 도움이 돼요. (상담 내용은 이 파일에 기록되지 않아요.)</p>
     <p><b>파일 위치:</b></p>
     <div class="debug-path">C:\Users\사용자이름\gongulbaki_debug.txt</div>
     <p style="margin-top:10px;"><b>파일 찾는 방법:</b></p>
@@ -375,6 +450,128 @@
 </div>
 
 <script>
+  // ═══════════════════════════════════════════════════════════════
+  // 사용법 콘텐츠 — 곤글박이_위키/ 문서를 원본으로 함께 관리.
+  // 위키가 바뀌면 이 데이터도 같은 세션에서 갱신할 것.
+  // 형식: { id, category(badge), title, keywords(검색용, 화면엔 표시 안 함), body }
+  // ═══════════════════════════════════════════════════════════════
+  const USAGE_DOCS = [
+    {
+      id: "privacy", category: "보안", badgeClass: "badge-teal",
+      title: "제 상담 음성이 서버에 올라가나요?",
+      keywords: "보안 프라이버시 서버 전송 개인정보 온디바이스 안전",
+      body: "아니요. 음성도, 변환된 텍스트도, 요약·분석 결과도 인터넷으로 전송되지 않습니다.\n모든 처리는 사용자 컴퓨터 안에서만 이루어지며, 개발자도 그 내용을 볼 수 없습니다.\n\n직접 확인하는 법: ① 변환을 한 번 성공시킨다(모델이 PC에 저장됨) → ② 인터넷을 끊는다 → ③ 다시 변환해본다. 인터넷 없이도 변환이 되면, 내용이 밖으로 안 나간다는 직접 증거입니다."
+    },
+    {
+      id: "transcribe", category: "사용법", badgeClass: "badge-blue",
+      title: "음성을 텍스트로 변환하기",
+      keywords: "변환 축어록 위스퍼 whisper 엔진 파일열기 이어서 이어하기 중지",
+      body: "① 파일 열기(📂)로 음성 파일(mp3, wav, m4a, mp4 등)을 선택하면 자동으로 변환이 시작돼요.\n첫 결과는 약 5~10분 후부터 나오고, 전체를 10분 단위 조각으로 나눠 순서대로 채워요.\n\n변환 엔진은 large-v3-turbo(OpenAI 공식, MIT 라이선스) 하나로 통일되어 있어요. 최초 1회만 다운로드하면 이후 인터넷 없이 작동해요.\n\n긴 녹음의 문장 반복(환각)을 막기 위해 무음 구간 제거·구간 분할·반복 필터 기술이 적용돼 있어요.\n\n변환 중 절전 등으로 중단되면 재실행 시 '이어서 변환' 배너로 이어할 수 있어요. 취소 버튼을 누르면 컴퓨터에서 도는 작업 자체가 즉시 멈춰요."
+    },
+    {
+      id: "split", category: "사용법", badgeClass: "badge-blue",
+      title: "화자 분리 편집 — 단축키와 표시 기능",
+      keywords: "화자분리 편집 단축키 커서 재생 형광펜 되돌리기 Enter",
+      body: "변환 결과를 확인한 뒤 '화자 분리 시작'을 누르면 편집 모드로 전환돼요.\n\n• Enter: 줄 분할 + 다음 화자로 자동 전환\n• 화자 칩 클릭: 상담사 ↔ 내담자 ↔ 제3자 ↔ 기타 순환\n• 되돌리기 버튼: 최대 30단계 실행 취소\n• Shift+Space: 편집 중에도 재생/정지, Shift+←/→: 3초 이동\n\n편집 중인 줄에는 초록 테두리와 커서 막대·삼각형 표식이, 재생 중인 문장에는 노란 형광펜과 왼쪽 초록 점이 표시돼요(새로 변환한 파일부터 작동해요)."
+    },
+    {
+      id: "save", category: "사용법", badgeClass: "badge-blue",
+      title: "저장 — 워드 · 텍스트 · 세션",
+      keywords: "저장 워드 docx 세션 json Ctrl+S 빠른저장 이어편집",
+      body: "워드(.docx): 제출·인쇄용 축어록 양식.\n텍스트(.txt): 가벼운 백업.\n세션(.json): 다시 불러와 이어서 편집할 때 필요 — 워드만 저장하면 나중에 곤글박이에서 이어 편집할 수 없으니, 꼭 세션도 함께 저장하세요.\n\nCtrl+S: 처음 한 번만 저장 위치를 정하면, 이후 Ctrl+S로 같은 파일(.docx + _세션.json)에 자동 저장돼요."
+    },
+    {
+      id: "analyze", category: "사용법", badgeClass: "badge-blue",
+      title: "분석 — 빈출 단어와 AI 요약",
+      keywords: "분석 빈출단어 요약 AI 수정 Qwen 초안",
+      body: "화자 분리를 먼저 완료해야 분석 버튼이 활성화돼요.\n\n빈출 단어는 한국어 형태소 분석기(Kiwi)의 실제 집계 결과예요 — AI 추측이 아니라 그대로 신뢰할 수 있어요. 전체/상담자/내담자로 나눠 볼 수 있고, 단어를 클릭하면 실제 등장 문장이 보여요.\n\n회기 요약은 온디바이스 AI(Qwen3, 선택 설치 2.4GB)가 만든 초안이에요. [수정] 버튼으로 직접 고쳐 저장할 수 있어요('수정됨' 표시가 붙어요).\n\n중요: 회기 요약은 반드시 상담자의 검토와 수정을 거쳐야 하는 초안입니다. 빈출 단어는 집계 결과라 그대로 신뢰 가능해요."
+    },
+    {
+      id: "genogram", category: "사용법", badgeClass: "badge-blue",
+      title: "가계도 그리기",
+      keywords: "가계도 genogram 인물 관계선 저장",
+      body: "가족 구조와 관계를 표준 기호로 그리는 편집기예요. 인물 추가(□○◇), 더블클릭으로 이름·나이 입력, 관계선(결혼·이혼·감정선 등) 연결, 특수 자녀 도형, 텍스트 상자 메모 등을 지원해요.\n\nSVG(이미지)로 저장하거나 JSON(재편집 가능)으로 저장할 수 있고, JSON은 사례서랍의 '가계도' 자리에 연결해두면 상담 전에 바로 꺼내볼 수 있어요."
+    },
+    {
+      id: "casedrawer", category: "사용법", badgeClass: "badge-blue",
+      title: "사례서랍 — 내담자별 자료 관리",
+      keywords: "사례서랍 폴더 비밀번호 잠금 라벨 색 검색 기본정보 심리검사 슈퍼비전",
+      body: "내담자별 사례 자료(음성·축어록·분석·가계도·심리검사·슈퍼비전)를 한곳에 모아, 상담 전에 훑어볼 수 있는 공간이에요.\n\n핵심 원칙: 사례 정보는 앱 내부가 아니라 사용자가 지정한 실제 폴더에 파일로 저장돼요. 앱을 지워도 그 폴더만 있으면 사례서랍 전체가 복구돼요. 음성·축어록·분석 파일은 원래 위치에 그대로 두고 연결만 해요(복사하지 않아요).\n\n처음 열면 저장 폴더 선택 → 잠금 비밀번호 설정을 하게 돼요. 비밀번호는 앱을 여는 관문일 뿐 파일 자체 암호화는 아니에요 — 분실 대비는 Windows 디스크 암호화(BitLocker)를 함께 쓰세요. 비밀번호를 잊으면 '재설정'으로 데이터 손실 없이 새로 정할 수 있어요.\n\n사례마다 색 라벨(노랑·초록·보라·파랑·분홍·주황)을 붙여 필요에 따라 자유롭게 구분할 수 있고, 내담자명·상담기간·회차로 검색할 수 있어요."
+    },
+    {
+      id: "settings", category: "사용법", badgeClass: "badge-blue",
+      title: "설정 — 엔진·모델·사용자 이름",
+      keywords: "설정 엔진 모델 다운로드 이름 시간표시",
+      body: "설정(⚙️)에서 변환 모델(large-v3-turbo, 약 1.6GB)과 요약 모델(Qwen3, 선택 설치 2.4GB)을 다운로드·삭제할 수 있어요. 사용자 이름(문서에 표시)과 시간 표시 여부도 여기서 설정해요."
+    },
+  ];
+
+  function renderUsageDocs() {
+    const panel = document.getElementById('panel-usage');
+    panel.innerHTML = USAGE_DOCS.map(d => `
+      <div class="card" data-id="${d.id}" data-search="${(d.title + ' ' + d.keywords + ' ' + d.body).toLowerCase()}">
+        <div class="card-header" onclick="toggle(this)">
+          <span class="badge ${d.badgeClass}">${d.category}</span>
+          <span class="card-title">${d.title}</span>
+          <span class="chevron">▼</span>
+        </div>
+        <div class="card-body">
+          <div class="plain">${d.body.replace(/</g, '&lt;')}</div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  const FAQS = [
+    { label: "음성이 서버로 가나요?", keyword: "서버" },
+    { label: "저장은 어떻게 하나요?", keyword: "저장" },
+    { label: "요약이 이상해요", keyword: "요약" },
+    { label: "비밀번호를 잊었어요", keyword: "비밀번호" },
+    { label: "사례서랍이 뭔가요?", keyword: "사례서랍" },
+    { label: "반복 문장이 나와요", keyword: "반복" },
+    { label: "화자는 어떻게 나누나요?", keyword: "화자분리" },
+  ];
+
+  function renderFaqRow() {
+    document.getElementById('faqRow').innerHTML = FAQS.map(f =>
+      `<button class="faq-chip" onclick="searchFor('${f.keyword}')">${f.label}</button>`
+    ).join('');
+  }
+
+  function searchFor(keyword) {
+    switchTab('usage');
+    const input = document.getElementById('searchInput');
+    input.value = keyword;
+    onSearch();
+  }
+
+  function onSearch() {
+    const q = document.getElementById('searchInput').value.trim().toLowerCase();
+    document.getElementById('searchClear').classList.toggle('show', q.length > 0);
+
+    if (!q) {
+      // 검색어 없으면 사용법 카드 전부 표시, 문제해결 탭 카드도 원복
+      document.querySelectorAll('.card').forEach(c => c.style.display = '');
+      document.getElementById('noResult').classList.remove('show');
+      return;
+    }
+
+    // 검색 중엔 세 탭 전체에서 찾아 보여준다 (탭 구분 없이 훑기 쉽게)
+    let anyMatch = false;
+    document.querySelectorAll('.card').forEach(c => {
+      const hay = c.dataset.search || (c.textContent || '').toLowerCase();
+      const match = hay.includes(q);
+      c.style.display = match ? '' : 'none';
+      if (match) anyMatch = true;
+    });
+    document.getElementById('noResult').classList.toggle('show', !anyMatch);
+  }
+
+  function clearSearch() {
+    document.getElementById('searchInput').value = '';
+    onSearch();
+  }
+
   async function copyDebugLog() {
     try {
       const res = await fetch('http://127.0.0.1:5577/api/debug-log');
@@ -403,9 +600,12 @@
   function switchTab(tab) {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-    document.querySelector(`[onclick="switchTab('${tab}')"]`).classList.add('active');
+    document.getElementById('tabbtn-' + tab).classList.add('active');
     document.getElementById('panel-' + tab).classList.add('active');
   }
+
+  renderUsageDocs();
+  renderFaqRow();
 </script>
 </body>
 </html>

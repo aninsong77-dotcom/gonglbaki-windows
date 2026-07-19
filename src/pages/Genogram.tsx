@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { createPortal } from "react-dom";
 
 // ─── 타입 ─────────────────────────────────────────────────────
 type Gender = "남성" | "여성" | "논바이너리" | "레즈비언" | "게이" | "임신" | "사산아" | "자연유산" | "인공유산";
@@ -18,13 +19,18 @@ interface GNode {
   substance: SubstanceType;
   label: string; age: string; x: number; y: number;
   identical?: boolean; // 일란성 쌍둥이
+  labelFontSize?: number; // 이름 글자 크기(px), 미지정 시 11
+  labelBold?: boolean; // 이름 글자 굵게
+  labelOffsetX?: number; // 이름 칸을 기본 위치에서 옮긴 거리(자유 이동), 미지정 시 0
+  labelOffsetY?: number;
 }
 interface GLine { id: string; from: string; to: string; lineType: LineType; }
 type ChildLineType = "일반" | "위탁" | "입양";
-interface Marriage { id: string; childIds: string[]; childLineTypes?: Record<string, ChildLineType>; twinGroups?: string[][]; twinDropOffsets?: number[]; }
-interface GTextBox { id: string; x: number; y: number; w: number; h: number; text: string; color: string; fontSize: number; }
+interface Marriage { id: string; childIds: string[]; childLineTypes?: Record<string, ChildLineType>; twinGroups?: string[][]; twinDropOffsets?: number[]; dropOffsetX?: number; }
+interface GTextBox { id: string; x: number; y: number; w: number; h: number; text: string; color: string; fontSize: number; bold?: boolean; }
 
 const NS = 56, SNAP = 18, CHILD_DROP = 70;
+const LABEL_LEADER_THRESHOLD = 16; // 이 거리 이상 이름 칸을 옮기면 안내선(연결선) 표시
 const uid = () => Math.random().toString(36).slice(2, 9);
 
 const FAMILY_TYPES: LineType[] = ["결혼", "별거", "이혼", "재결합", "동거", "약혼", "사별"];
@@ -200,7 +206,8 @@ function TwoLineBtn({ top, bottom, onClick, active, disabled, danger, preview, b
 
 
 // ─── 메인 ─────────────────────────────────────────────────────
-export default function Genogram() {
+// onOpenTour: 웹 스케치북 버전에서만 전달(가이드 투어 버튼). 데스크탑 앱에서는 항상 undefined — 미사용.
+export default function Genogram({ onOpenTour }: { onOpenTour?: () => void } = {}) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
 
@@ -225,8 +232,16 @@ export default function Genogram() {
   const [textBoxColor, setTextBoxColor] = useState("#222222");
   const [editingTbId, setEditingTbId] = useState<string | null>(null);
   const tbDragRef = useRef<{ id: string; type: "move" | "resize"; ox: number; oy: number; initW?: number; initH?: number } | null>(null);
+  // 인물 이름 칸 자유 이동 드래그 — 시작 시점 마우스 위치·오프셋 기억
+  const labelDragRef = useRef<{ id: string; startPtX: number; startPtY: number; startOffX: number; startOffY: number } | null>(null);
   const [showSaveMenu, setShowSaveMenu] = useState(false);
+  // 툴바가 overflow-hidden 이라 드롭다운을 fixed 로 띄움 — 버튼 위치 기억용
+  const [saveMenuPos, setSaveMenuPos] = useState<{ x: number; y: number } | null>(null);
   const saveMenuRef = useRef<HTMLDivElement>(null);
+  const [showLabelStyleMenu, setShowLabelStyleMenu] = useState(false);
+  const labelStyleMenuRef = useRef<HTMLDivElement>(null); // 버튼(앵커) — 위치 계산 + 바깥클릭 판정용
+  const labelStylePanelRef = useRef<HTMLDivElement>(null); // 포털로 뜨는 드롭다운 패널 — 바깥클릭 판정용
+  const [labelMenuPos, setLabelMenuPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const jsonInputRef = useRef<HTMLInputElement>(null);
 
   // 범례
@@ -255,6 +270,7 @@ export default function Genogram() {
   }, []);
 
   const dragRef = useRef<{ id: string; ox: number; oy: number } | null>(null);
+  const childDropDragRef = useRef<{ marriageId: string; ox: number } | null>(null);
   const spaceRef = useRef(false);
   const [spaceDown, setSpaceDown] = useState(false);
   const [rubber, setRubber] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -526,6 +542,20 @@ export default function Genogram() {
         setLegendFontScale(Math.max(0.5, Math.min(2.5, (initF || 1) + dy / 80)));
       }
     }
+    if (childDropDragRef.current) {
+      const pt = svgPt(e.clientX, e.clientY);
+      const { marriageId, ox } = childDropDragRef.current;
+      let next = pt.x - ox;
+      const DROP_SNAP = 8; // 자석 스냅: 정중앙(오프셋 0) 근처면 딱 붙게
+      if (Math.abs(next) < DROP_SNAP) next = 0;
+      setMarriages(p => p.map(m => m.id === marriageId ? { ...m, dropOffsetX: next } : m));
+    }
+    if (labelDragRef.current) {
+      const pt = svgPt(e.clientX, e.clientY);
+      const { id, startPtX, startPtY, startOffX, startOffY } = labelDragRef.current;
+      const dx = pt.x - startPtX, dy = pt.y - startPtY;
+      setNodes(p => p.map(n => n.id === id ? { ...n, labelOffsetX: startOffX + dx, labelOffsetY: startOffY + dy } : n));
+    }
   };
 
   const onMouseUp = () => {
@@ -537,7 +567,7 @@ export default function Genogram() {
       lines.forEach(l => { const p1 = getEndpoint(l.from, nodes, lines), p2 = getEndpoint(l.to, nodes, lines); const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2; if (mx >= x && mx <= x + w && my >= y && my <= y + h) s.add(l.id); });
       if (s.size) setSelected(s);
     }
-    dragRef.current = null; rbStart.current = null; legendDragRef.current = null; tbDragRef.current = null; setRubber(null);
+    dragRef.current = null; rbStart.current = null; legendDragRef.current = null; tbDragRef.current = null; childDropDragRef.current = null; labelDragRef.current = null; setRubber(null);
   };
 
   const onCanvasDown = (e: React.MouseEvent) => {
@@ -590,6 +620,9 @@ export default function Genogram() {
     e.stopPropagation(); e.preventDefault(); dragRef.current = null;
     const node = nodes.find(n => n.id === id); if (!node) return;
     setEditId(id); setEditField(field); setEditVal(field === "label" ? node.label : node.age);
+    // 더블클릭 직전의 첫 클릭이 선택을 토글해제시켜(1개 선택 상태에서 재클릭 시 해제) 편집 후
+    // "이름 글자 크기" 등 선택 필요 컨트롤이 비활성 상태로 남는 문제 방지 — 편집 대상은 항상 선택 상태로 고정
+    setSelected(new Set([id]));
   };
   const commitEdit = () => {
     if (!editId) return;
@@ -597,19 +630,59 @@ export default function Genogram() {
     setEditId(null);
   };
 
+  // 저장용 SVG 생성 — 실제 그려진 내용(getBBox) 기준으로 여백 최소화, 화면 확대/이동 상태 제거
+  const buildExportSvg = (stripTextOutline = false) => {
+    const svg = svgRef.current; if (!svg || !nodes.length) return null;
+    const rootG = svg.querySelector("g"); if (!rootG) return null;
+    const b = (rootG as SVGGElement).getBBox();
+    const pad = 12;
+    const w = Math.ceil(b.width + pad * 2), h = Math.ceil(b.height + pad * 2);
+    const clone = svg.cloneNode(true) as SVGSVGElement;
+    clone.querySelector("g")?.removeAttribute("transform");
+    clone.setAttribute("viewBox", `${Math.floor(b.x - pad)} ${Math.floor(b.y - pad)} ${w} ${h}`);
+    clone.setAttribute("width", String(w));
+    clone.setAttribute("height", String(h));
+    clone.removeAttribute("style");
+    // SVG 파일 저장 시 화면용 흰 테두리(paint-order="stroke") 제거 — 한글(HWP) 등
+    // paint-order 미지원 렌더러는 흰 테두리를 글자 위에 덮어 그려서 글씨가 안 보임
+    if (stripTextOutline) clone.querySelectorAll("text").forEach(t => {
+      if (t.getAttribute("paint-order")) {
+        t.removeAttribute("stroke"); t.removeAttribute("stroke-width");
+        t.removeAttribute("stroke-linejoin"); t.removeAttribute("paint-order");
+      }
+    });
+    return { data: new XMLSerializer().serializeToString(clone), w, h };
+  };
+
+  const downloadBlob = (blob: Blob, name: string) => {
+    const url = URL.createObjectURL(blob); const a = document.createElement("a");
+    a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url);
+  };
+
   const saveImg = () => {
-    const svg = svgRef.current; if (!svg || !nodes.length) return;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    nodes.forEach(n => { minX = Math.min(minX, n.x - 10); minY = Math.min(minY, n.y - 10); maxX = Math.max(maxX, n.x + NS + 10); maxY = Math.max(maxY, n.y + NS + 30); });
-    const canvasW = wrapRef.current?.clientWidth || canvasSize.w, canvasH = wrapRef.current?.clientHeight || canvasSize.h;
-    const lx = legendPos?.x ?? (canvasW - legendBoxW - 16), ly = legendPos?.y ?? (canvasH - 300);
-    minX = Math.min(minX, lx - 10); minY = Math.min(minY, ly - 10);
-    maxX = Math.max(maxX, lx + legendBoxW + 10); maxY = Math.max(maxY, ly + (legendBoxH || 400) + 10);
-    const pad = 20;
-    const data = new XMLSerializer().serializeToString(svg);
-    const modified = data.replace(/viewBox="[^"]*"/, `viewBox="${minX - pad} ${minY - pad} ${maxX - minX + pad * 2} ${maxY - minY + pad * 2}"`);
-    const blob = new Blob([modified], { type: "image/svg+xml" });
-    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "가계도.svg"; a.click(); URL.revokeObjectURL(url);
+    const ex = buildExportSvg(true); if (!ex) return;
+    downloadBlob(new Blob([ex.data], { type: "image/svg+xml" }), "가계도.svg");
+    setShowSaveMenu(false);
+  };
+
+  // 한글·워드는 SVG 글자를 제대로 못 그리는 경우가 많아 PNG 저장 제공 (문서 삽입용 권장)
+  const savePng = () => {
+    const ex = buildExportSvg(); if (!ex) return;
+    const url = URL.createObjectURL(new Blob([ex.data], { type: "image/svg+xml" }));
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.max(1, Math.min(3, 4096 / Math.max(ex.w, ex.h)));
+      const c = document.createElement("canvas");
+      c.width = Math.round(ex.w * scale); c.height = Math.round(ex.h * scale);
+      const ctx = c.getContext("2d");
+      if (!ctx) { URL.revokeObjectURL(url); return; }
+      ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      c.toBlob(b => { if (b) downloadBlob(b, "가계도.png"); }, "image/png");
+    };
+    img.onerror = () => URL.revokeObjectURL(url);
+    img.src = url;
     setShowSaveMenu(false);
   };
 
@@ -630,8 +703,17 @@ export default function Genogram() {
   const loadJson = (file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
+      let raw = (e.target?.result as string) ?? "";
+      // 일부 텍스트 편집기·구버전 저장 경로에서 붙는 UTF-8 BOM 제거(있으면 JSON.parse가 무조건 실패함)
+      if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+      let data: any;
       try {
-        const data = JSON.parse(e.target?.result as string);
+        data = JSON.parse(raw);
+      } catch (err) {
+        alert(`가계도 JSON 파일을 읽을 수 없습니다.\n(${err instanceof Error ? err.message : String(err)})`);
+        return;
+      }
+      try {
         if (data.version !== 1) { alert("지원하지 않는 가계도 파일 형식입니다."); return; }
         saveHistory();
         setNodes(data.nodes ?? []);
@@ -645,7 +727,9 @@ export default function Genogram() {
         if (data.legendLabelOverrides !== undefined) setLegendLabelOverrides(data.legendLabelOverrides);
         if (data.legendVisible !== undefined) setLegendVisible(data.legendVisible);
         if (data.bw !== undefined) setBw(data.bw);
-      } catch { alert("가계도 JSON 파일을 읽을 수 없습니다."); }
+      } catch (err) {
+        alert(`가계도 파일을 적용하는 중 오류가 발생했습니다.\n(${err instanceof Error ? err.message : String(err)})`);
+      }
     };
     reader.readAsText(file, "utf-8");
   };
@@ -655,6 +739,11 @@ export default function Genogram() {
     const handler = (e: MouseEvent) => {
       if (saveMenuRef.current && !saveMenuRef.current.contains(e.target as Node)) {
         setShowSaveMenu(false);
+      }
+      const inBtn = labelStyleMenuRef.current && labelStyleMenuRef.current.contains(e.target as Node);
+      const inPanel = labelStylePanelRef.current && labelStylePanelRef.current.contains(e.target as Node);
+      if (!inBtn && !inPanel) {
+        setShowLabelStyleMenu(false);
       }
     };
     document.addEventListener("mousedown", handler);
@@ -816,7 +905,8 @@ export default function Genogram() {
     const p1 = getEndpoint(ml.from, nodes, lines), p2 = getEndpoint(ml.to, nodes, lines);
     const children = m.childIds.map(cid => nodes.find(n => n.id === cid)).filter(Boolean) as GNode[];
     if (!children.length) return null;
-    const midX = (p1.x + p2.x) / 2, parentY = (p1.y + p2.y) / 2, dropY = parentY + CHILD_DROP;
+    const midX = (p1.x + p2.x) / 2 + (m.dropOffsetX ?? 0), parentY = (p1.y + p2.y) / 2, dropY = parentY + CHILD_DROP;
+    const isSel = selected.has(m.id);
     const xs = children.map(c => nc(c).x);
     const topOf = (c: GNode) => ["임신","사산아","자연유산","인공유산"].includes(c.gender) ? ncTop(c) : { x: nc(c).x, y: c.y };
     const col = "#374151"; const sw = 2;
@@ -826,29 +916,13 @@ export default function Genogram() {
 
     return (
       <g key={`m-${m.id}`}>
-        {/* ── 비쌍둥이 자녀 선 ── */}
-        {nonTwinChildren.length === 1 ? (() => {
-          // 자녀 1명: parentY → 자녀 도형 상단까지 전체를 특수선으로
-          const c = nonTwinChildren[0];
-          const clt = m.childLineTypes?.[c.id] || "일반";
-          const cx = nc(c).x;
-          const ty = topOf(c).y;
-          if (clt === "위탁") return (
-            <line key={c.id} x1={midX} y1={parentY} x2={cx} y2={ty} stroke={col} strokeWidth={sw} strokeDasharray="6 4" />
-          );
-          if (clt === "입양") return (
-            <g key={c.id}>
-              <line x1={midX - 3} y1={parentY} x2={cx - 3} y2={ty} stroke={col} strokeWidth={sw} />
-              <line x1={midX + 3} y1={parentY} x2={cx + 3} y2={ty} stroke={col} strokeWidth={sw} strokeDasharray="5 4" />
-            </g>
-          );
-          // 일반
-          return <line key={c.id} x1={midX} y1={parentY} x2={cx} y2={ty} stroke={col} strokeWidth={sw} />;
-        })() : nonTwinChildren.length > 1 ? (
-          // 자녀 2명 이상: 기존 방식 (수직선 → 수평바 → 각 자녀)
+        {/* ── 비쌍둥이 자녀 선: 수직 몸통선(항상 x1===x2===midX라 무조건 수직) → 가로 바 → 각 자녀로 드롭.
+             자녀가 1명이면 가로 바 길이가 0이 되어 자연히 몸통선만 보임(예전의 "1명 특수선"과 동일하게 보이되,
+             드래그로 위치를 옮겨도 몸통선은 항상 정확히 수직 유지) ── */}
+        {nonTwinChildren.length > 0 && (
           <>
             <line x1={midX} y1={parentY} x2={midX} y2={dropY} stroke={col} strokeWidth={sw} />
-            <line x1={Math.min(...nonTwinChildren.map(c => nc(c).x))} y1={dropY} x2={Math.max(...nonTwinChildren.map(c => nc(c).x))} y2={dropY} stroke={col} strokeWidth={sw} />
+            <line x1={Math.min(midX, ...nonTwinChildren.map(c => nc(c).x))} y1={dropY} x2={Math.max(midX, ...nonTwinChildren.map(c => nc(c).x))} y2={dropY} stroke={col} strokeWidth={sw} />
             {nonTwinChildren.map(c => {
               const clt = m.childLineTypes?.[c.id] || "일반";
               const cx = nc(c).x;
@@ -863,7 +937,7 @@ export default function Genogram() {
               return <line key={c.id} x1={cx} y1={dropY} x2={cx} y2={ty} stroke={col} strokeWidth={sw} />;
             })}
           </>
-        ) : null}
+        )}
         {twinGroups.map((group, gi) => {
           const gc = group.map(id => nodes.find(n => n.id === id)).filter(Boolean) as GNode[];
           if (gc.length < 2) return null;
@@ -890,6 +964,18 @@ export default function Genogram() {
             </g>
           );
         })}
+        {/* 자녀선이 결혼선에서 내려오는 지점 — 선택 시에만 좌우로 드래그해 위치 조정 가능 */}
+        {isSel && nonTwinChildren.length > 0 && (
+          <circle cx={midX} cy={parentY + 16} r={6} fill="#fff" stroke="#3a6a4a" strokeWidth={2}
+            style={{ cursor: "ew-resize" }}
+            onMouseDown={e => {
+              e.stopPropagation();
+              const pt = svgPt(e.clientX, e.clientY);
+              childDropDragRef.current = { marriageId: m.id, ox: pt.x - (m.dropOffsetX ?? 0) };
+            }}>
+            <title>드래그해서 자녀선 위치 좌우로 이동</title>
+          </circle>
+        )}
       </g>
     );
   };
@@ -1315,21 +1401,74 @@ export default function Genogram() {
                       <span className="text-[13px] font-bold leading-none">T</span>
                       <span className="text-[9px]">텍스트</span>
                     </button>
-                    {[["#222222","검정"],["#dc2626","빨강"],["#2563eb","파랑"]].map(([col, label]) => (
-                      <button key={col} onClick={() => setTextBoxColor(col)} title={label}
-                        className={`w-5 h-5 rounded-full border-2 transition-all ${textBoxColor === col ? "border-[#3a6a4a] scale-110" : "border-gray-300"}`}
-                        style={{ background: col }} />
-                    ))}
-                    {Array.from(selected).some(id => textBoxes.some(t => t.id === id)) && (
-                      <div className="flex items-center gap-0.5 ml-1">
-                        <button onClick={() => { saveHistory(); setTextBoxes(p => p.map(t => selected.has(t.id) ? { ...t, fontSize: Math.max(8, t.fontSize - 2) } : t)); }}
-                          className="w-5 h-5 rounded border border-gray-200 bg-gray-50 text-xs flex items-center justify-center hover:bg-gray-100">−</button>
-                        <span className="text-[10px] text-gray-500 w-6 text-center">{textBoxes.find(t => selected.has(t.id))?.fontSize ?? 14}</span>
-                        <button onClick={() => { saveHistory(); setTextBoxes(p => p.map(t => selected.has(t.id) ? { ...t, fontSize: Math.min(48, t.fontSize + 2) } : t)); }}
-                          className="w-5 h-5 rounded border border-gray-200 bg-gray-50 text-xs flex items-center justify-center hover:bg-gray-100">+</button>
-                      </div>
-                    )}
+                    <div className="flex flex-col gap-0.5 shrink-0">
+                      {[["#222222","검정"],["#dc2626","빨강"],["#2563eb","파랑"]].map(([col, label]) => (
+                        <button key={col} title={`${label} — 선택한 텍스트에 바로 적용, 새 텍스트 상자 기본색으로도 사용`}
+                          onClick={() => {
+                            setTextBoxColor(col);
+                            const selTbIds = Array.from(selected).filter(id => textBoxes.some(t => t.id === id));
+                            if (selTbIds.length) {
+                              saveHistory();
+                              setTextBoxes(p => p.map(t => selTbIds.includes(t.id) ? { ...t, color: col } : t));
+                            }
+                          }}
+                          className={`w-4 h-4 rounded-full border-2 transition-all ${textBoxColor === col ? "border-[#3a6a4a] scale-110" : "border-gray-300"}`}
+                          style={{ background: col }} />
+                      ))}
+                    </div>
                   </div>
+
+                  {/* 글씨(이름·나이·텍스트박스 공통) 크기·굵기 — 하나만 선택돼도, 여러 개 섞여 선택돼도 항상 이 버튼 하나 */}
+                  {(() => {
+                    const selNode = nodes.find(n => selected.has(n.id));
+                    const selTb = textBoxes.find(t => selected.has(t.id));
+                    const hasTextTarget = !!selNode || !!selTb;
+                    const curSize = selNode ? (selNode.labelFontSize ?? 11) : (selTb ? selTb.fontSize : 11);
+                    const curBold = selNode ? !!selNode.labelBold : (selTb ? !!selTb.bold : false);
+                    const applySize = (v: number) => {
+                      saveHistory();
+                      setNodes(p => p.map(n => selected.has(n.id) ? { ...n, labelFontSize: v } : n));
+                      setTextBoxes(p => p.map(t => selected.has(t.id) ? { ...t, fontSize: v } : t));
+                    };
+                    const applyBold = () => {
+                      const next = !curBold;
+                      saveHistory();
+                      setNodes(p => p.map(n => selected.has(n.id) ? { ...n, labelBold: next } : n));
+                      setTextBoxes(p => p.map(t => selected.has(t.id) ? { ...t, bold: next } : t));
+                    };
+                    return (
+                      <div className="shrink-0" ref={labelStyleMenuRef}>
+                        <TwoLineBtn top="Aa" bottom="글씨" onClick={() => {
+                            if (!showLabelStyleMenu) {
+                              const r = labelStyleMenuRef.current?.getBoundingClientRect();
+                              if (r) setLabelMenuPos({ top: r.bottom + 4, left: r.left + r.width / 2 });
+                            }
+                            setShowLabelStyleMenu(v => !v);
+                          }}
+                          disabled={!hasTextTarget} active={showLabelStyleMenu} />
+                        {showLabelStyleMenu && hasTextTarget && createPortal(
+                          <div ref={labelStylePanelRef}
+                            className="fixed z-[9999] bg-white border border-gray-200 rounded-lg shadow-lg p-2 flex flex-col gap-2"
+                            style={{ top: labelMenuPos.top, left: labelMenuPos.left, transform: "translateX(-50%)", minWidth: 128 }}>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[10px] text-gray-500 whitespace-nowrap">크기</span>
+                              <input type="number" min={6} max={48} value={curSize}
+                                onChange={e => applySize(Math.max(6, Math.min(48, Number(e.target.value) || curSize)))}
+                                title="선택한 글씨 크기 (이름 편집 칸에서는 Enter로 줄바꿈)"
+                                className="w-14 h-6 text-xs border border-gray-200 rounded px-1 text-center" />
+                            </div>
+                            <button onClick={applyBold}
+                              className={`flex items-center justify-between gap-2 px-2 py-1 rounded border text-[10px] font-medium transition-colors
+                                ${curBold ? "bg-[#e8f4e8] border-[#3a6a4a] text-[#2d7a3a]" : "border-gray-200 bg-gray-50 text-gray-700 hover:bg-[#f0f7f2]"}`}>
+                              <span>굵게</span>
+                              <span className="font-bold">B</span>
+                            </button>
+                          </div>,
+                          document.body
+                        )}
+                      </div>
+                    );
+                  })()}
 
           <div className="h-6 w-px bg-gray-200" />
 
@@ -1379,17 +1518,32 @@ export default function Genogram() {
           </div>
           {/* 저장 드롭다운 */}
           <div className="relative" ref={saveMenuRef}>
-            <TwoLineBtn top="💾" bottom="저장" onClick={() => setShowSaveMenu(v => !v)} active={showSaveMenu} />
-            {showSaveMenu && (
-              <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden" style={{ minWidth: 168 }}>
+            <TwoLineBtn top="💾" bottom="저장" onClick={() => {
+              const r = saveMenuRef.current?.getBoundingClientRect();
+              if (r) setSaveMenuPos({ x: r.left + r.width / 2, y: r.bottom });
+              setShowSaveMenu(v => !v);
+            }} active={showSaveMenu} />
+            {showSaveMenu && saveMenuPos && (
+              <div className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden"
+                style={{ minWidth: 168, top: saveMenuPos.y + 4, left: Math.max(90, Math.min(saveMenuPos.x, window.innerWidth - 90)), transform: "translateX(-50%)" }}>
                 <button
-                  onClick={saveImg}
+                  onClick={savePng}
                   className="w-full px-3 py-2 text-left text-xs hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100"
                 >
                   <span className="text-base">🖼️</span>
                   <div>
+                    <div className="font-medium text-gray-700">PNG로 저장</div>
+                    <div className="text-[10px] text-gray-400">한글·워드 붙여넣기용 (권장)</div>
+                  </div>
+                </button>
+                <button
+                  onClick={saveImg}
+                  className="w-full px-3 py-2 text-left text-xs hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100"
+                >
+                  <span className="text-base">📐</span>
+                  <div>
                     <div className="font-medium text-gray-700">SVG로 저장</div>
-                    <div className="text-[10px] text-gray-400">이미지 파일 (수정 불가)</div>
+                    <div className="text-[10px] text-gray-400">고화질 벡터 (확대해도 안 깨짐)</div>
                   </div>
                 </button>
                 <button
@@ -1475,12 +1629,13 @@ export default function Genogram() {
                     <foreignObject x={4} y={4} width={NS - 8} height={20}>
                       <input autoFocus value={editVal} onChange={e => setEditVal(e.target.value)}
                         onBlur={commitEdit} onKeyDown={e => { if (e.key === "Enter") commitEdit(); if (e.key === "Escape") setEditId(null); }}
-                        style={{ width: "100%", fontSize: 10, textAlign: "center", border: "1px solid #3a6a4a", borderRadius: 2, padding: "1px 2px", outline: "none", background: "rgba(255,255,255,0.9)" }} />
+                        style={{ width: "100%", fontSize: n.labelFontSize ?? 10, fontWeight: n.labelBold ? 700 : 400, textAlign: "center", border: "1px solid #3a6a4a", borderRadius: 2, padding: "1px 2px", outline: "none", background: "rgba(255,255,255,0.9)" }} />
                     </foreignObject>
                   ) : (
-                    <text x={NS / 2} y={n.gender === "논바이너리" ? (n.client ? NS / 2 + 4 : 22) : (n.client ? NS / 2 + 4 : 16)} textAnchor="middle" fontSize={10}
+                    <text x={NS / 2} y={n.gender === "논바이너리" ? (n.client ? NS / 2 + 4 : 22) : (n.client ? NS / 2 + 4 : 16)} textAnchor="middle" fontSize={n.labelFontSize ?? 10}
+                      fontWeight={n.labelBold ? 700 : 400}
                       fill={n.age ? "#222" : "#bbb"}
-                      stroke={n.substance ? "white" : "none"} strokeWidth={n.substance ? 2.5 : 0} paintOrder="stroke"
+                      stroke="white" strokeWidth={3} strokeLinejoin="round" paintOrder="stroke"
                       fontFamily="'Malgun Gothic', sans-serif"
                       style={{ cursor: "text" }}
                       onClick={e => { e.stopPropagation(); startEdit(e, n.id, "age"); }}>
@@ -1488,22 +1643,47 @@ export default function Genogram() {
                     </text>
                   )
                 )}
-                {/* 이름 (도형 아래 — 특수자녀는 도형이 작아서 가까이) */}
+                {/* 이름 (도형 아래 — 특수자녀는 도형이 작아서 가까이). 자유 이동 가능, 멀리 옮기면 안내선 표시 */}
                 {(() => {
                   const isSpecial = ["임신","사산아","자연유산","인공유산"].includes(n.gender);
+                  const labelFs = n.labelFontSize ?? 11;
+                  const labelFw = n.labelBold ? 700 : 500;
                   const labelY = isSpecial ? NS/2 + (n.gender === "자연유산" || n.gender === "인공유산" ? 20 : 28) : NS + 15;
                   const foY = isSpecial ? labelY - 12 : NS + 2;
-                  return editId === n.id && editField === "label" ? (
-                    <foreignObject x={-20} y={foY} width={NS + 40} height={26}>
-                      <input autoFocus value={editVal} onChange={e => setEditVal(e.target.value)}
-                        onBlur={commitEdit} onKeyDown={e => { if (e.key === "Enter") commitEdit(); if (e.key === "Escape") setEditId(null); }}
-                        style={{ width: "100%", fontSize: 11, textAlign: "center", border: "1px solid #3a6a4a", borderRadius: 3, padding: "1px 3px", outline: "none" }} />
-                    </foreignObject>
-                  ) : (
-                    <text x={NS / 2} y={labelY} textAnchor="middle" fontSize={11} fontWeight="500"
-                      fill={n.label ? "#222" : "#ccc"} fontFamily="'Malgun Gothic', sans-serif">
-                      {n.label || "더블클릭"}
-                    </text>
+                  const offX = n.labelOffsetX ?? 0, offY = n.labelOffsetY ?? 0;
+                  const showLeader = Math.abs(offX) > LABEL_LEADER_THRESHOLD || Math.abs(offY) > LABEL_LEADER_THRESHOLD;
+                  const startDrag = (e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    const pt = svgPt(e.clientX, e.clientY);
+                    saveHistory();
+                    labelDragRef.current = { id: n.id, startPtX: pt.x, startPtY: pt.y, startOffX: offX, startOffY: offY };
+                  };
+                  return (
+                    <>
+                      {showLeader && (
+                        <line x1={NS / 2} y1={NS / 2} x2={NS / 2 + offX} y2={labelY + offY - labelFs}
+                          stroke="#9ca3af" strokeWidth={1} strokeDasharray="3 2" opacity={0.8} pointerEvents="none" />
+                      )}
+                      {editId === n.id && editField === "label" ? (
+                        <foreignObject x={-20 + offX} y={foY + offY} width={NS + 40} height={44}>
+                          <textarea autoFocus value={editVal} onChange={e => setEditVal(e.target.value)}
+                            onBlur={commitEdit}
+                            onKeyDown={e => { if (e.key === "Escape") setEditId(null); e.stopPropagation(); }}
+                            rows={2}
+                            style={{ width: "100%", height: "100%", fontSize: labelFs, fontWeight: labelFw, textAlign: "center", border: "1px solid #3a6a4a", borderRadius: 3, padding: "1px 3px", outline: "none", resize: "none", fontFamily: "'Malgun Gothic', sans-serif", lineHeight: 1.2 }} />
+                        </foreignObject>
+                      ) : (
+                        <text x={NS / 2 + offX} y={labelY + offY} textAnchor="middle" fontSize={labelFs} fontWeight={labelFw}
+                          fill={n.label ? "#222" : "#ccc"} stroke="white" strokeWidth={3} strokeLinejoin="round" paintOrder="stroke"
+                          fontFamily="'Malgun Gothic', sans-serif"
+                          style={{ cursor: "move" }}
+                          onMouseDown={startDrag}>
+                          {(n.label || "더블클릭").split("\n").map((ln, li, arr) => (
+                            <tspan key={li} x={NS / 2 + offX} dy={li === 0 ? -(arr.length - 1) * labelFs * 0.6 : labelFs * 1.2}>{ln}</tspan>
+                          ))}
+                        </text>
+                      )}
+                    </>
                   );
                 })()}
               </g>
@@ -1785,7 +1965,7 @@ export default function Genogram() {
                 {isEditing ? (
                   <foreignObject x={tb.x} y={tb.y} width={tb.w} height={tb.h}>
                     <textarea
-                      style={{ width: "100%", height: "100%", border: "none", background: "transparent", resize: "none", fontSize: tb.fontSize, color: tb.color, fontFamily: "'Malgun Gothic', sans-serif", outline: "none", padding: "4px" }}
+                      style={{ width: "100%", height: "100%", border: "none", background: "transparent", resize: "none", fontSize: tb.fontSize, fontWeight: tb.bold ? 700 : 400, color: tb.color, fontFamily: "'Malgun Gothic', sans-serif", outline: "none", padding: "4px" }}
                       autoFocus
                       defaultValue={tb.text}
                       onBlur={e => { setTextBoxes(p => p.map(t => t.id === tb.id ? { ...t, text: e.target.value } : t)); setEditingTbId(null); }}
@@ -1794,7 +1974,7 @@ export default function Genogram() {
                     />
                   </foreignObject>
                 ) : (
-                  <text x={tb.x + 4} y={tb.y + tb.fontSize + 2} fontSize={tb.fontSize} fill={tb.color} fontFamily="'Malgun Gothic', sans-serif" style={{ whiteSpace: "pre-wrap", pointerEvents: "none" }}>
+                  <text x={tb.x + 4} y={tb.y + tb.fontSize + 2} fontSize={tb.fontSize} fontWeight={tb.bold ? 700 : 400} fill={tb.color} stroke="white" strokeWidth={3} strokeLinejoin="round" paintOrder="stroke" fontFamily="'Malgun Gothic', sans-serif" style={{ whiteSpace: "pre-wrap", pointerEvents: "none" }}>
                     {tb.text.split("\n").map((line, i) => (
                       <tspan key={i} x={tb.x + 4} dy={i === 0 ? 0 : tb.fontSize * 1.3}>{line}</tspan>
                     ))}
@@ -1942,9 +2122,26 @@ export default function Genogram() {
             <span className="text-gray-300">|</span>
             <span className="whitespace-nowrap"><kbd className="px-1.5 py-0.5 bg-gray-100 rounded font-mono text-[10px] font-semibold">나이클릭</kbd> 나이편집</span>
           </div>
-          <span className="ml-auto font-semibold shrink-0 text-right leading-tight text-[11px] text-gray-500 whitespace-nowrap">
-            © 2026. An In-song. Distributed for free.<br />(2026. 안인성. 무료 배포)
-          </span>
+          <div className="ml-auto flex items-center gap-2 shrink-0">
+            {onOpenTour && (
+              <button onClick={onOpenTour} title="사용 안내 투어 다시 보기" className="geo-tour-btn-inline"
+                style={{
+                  width: 38, height: 38, borderRadius: "50%", border: "none", padding: 0,
+                  background: "linear-gradient(135deg,#52916a 0%,#3a6a4a 100%)",
+                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                <svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+                  <path d="M4 5.6C4 4.7 4.7 4 5.6 4h12.8C19.3 4 20 4.7 20 5.6v8.8c0 .9-.7 1.6-1.6 1.6H9.2l-3.6 3c-.6.5-1.6.1-1.6-.7V5.6Z" fill="#fff" />
+                  <circle cx={8.8} cy={10} r={1.25} fill="#3a6a4a" />
+                  <circle cx={12} cy={10} r={1.25} fill="#3a6a4a" />
+                  <circle cx={15.2} cy={10} r={1.25} fill="#3a6a4a" />
+                </svg>
+              </button>
+            )}
+            <span className="font-semibold text-right leading-tight text-[11px] text-gray-500 whitespace-nowrap">
+              © 2026. An In-song. Distributed for free.<br />(2026. 안인성. 무료 배포)
+            </span>
+          </div>
         </div>
         {/* 2행: 단축키 나머지 */}
         <div className="px-5 pb-2.5 flex items-center gap-3 text-[11px] text-gray-500 font-medium">
