@@ -104,6 +104,7 @@ const caseDrawerAPI = (window as any).caseDrawerAPI as {
   readBinary: (filePath: string) => Promise<string | null>; // base64
   fileExists: (filePath: string) => Promise<boolean>;
   openExternal: (filePath: string) => Promise<boolean>;
+  moveFile: (srcPath: string, destDir: string) => Promise<{ ok: boolean; path: string; moved: boolean; reason: string }>;
 } | undefined;
 
 const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -119,6 +120,45 @@ const TRANSCRIPT_DOC_FILTERS = [{ name: "축어록 문서", extensions: ["docx",
 const fileUrl = (p: string) => "file:///" + p.replace(/\\/g, "/").replace(/^\/+/, "");
 const joinPath = (...parts: string[]) => parts.join(/\\/.test(parts[0]) ? "\\" : "/");
 const sanitizeForFolder = (s: string) => s.replace(/[<>:"/\\|?*]/g, "_").trim() || "이름없음";
+
+// ── 파일 자동 정리 ────────────────────────────────────────────────────
+// 첨부한 파일을 사례 폴더 안 제자리로 "이동"시킨다(설계: docsPlan/사례서랍-파일자동정리/계획.md).
+//   내담자폴더/01회기/   ← 음성·축어록(docx)·축어록 세션(json)·분석
+//   내담자폴더/슈퍼비전/
+//   내담자폴더/심리검사/  ← 심리검사 결과 + 심리검사 슈퍼비전 보고서
+//   내담자폴더/기타/      ← 가계도 포함
+type FileSlot = { kind: "session"; sessionNo: number } | { kind: "supervision" | "psychTest" | "etc" };
+
+const slotFolder = (slot: FileSlot) =>
+  slot.kind === "session" ? `${String(slot.sessionNo).padStart(2, "0")}회기`
+  : slot.kind === "supervision" ? "슈퍼비전"
+  : slot.kind === "psychTest" ? "심리검사"
+  : "기타";
+
+// 파일을 제자리로 옮기고 "앞으로 쓸 경로"를 돌려준다.
+// 이동에 실패해도(파일이 열려 있음·권한 없음 등) 첨부 자체는 살리기 위해 원래 경로를 그대로 반환한다.
+const filePlacementNoticeKey = "gb_case_move_notice";
+async function placeFile(caseDir: string | null, slot: FileSlot, srcPath: string): Promise<string> {
+  if (!caseDrawerAPI?.moveFile || !caseDir) return srcPath;
+  // 파일이 원래 자리에서 사라지는 동작이라 처음 한 번은 반드시 알리고 동의를 받는다
+  if (!localStorage.getItem(filePlacementNoticeKey)) {
+    const ok = window.confirm(
+      "첨부한 파일은 사례서랍 폴더 안으로 이동합니다.\n" +
+      "(원래 있던 위치에서는 사라지고, 사례별·회기별 폴더로 자동 정리됩니다.)\n\n" +
+      "계속할까요?\n[취소]를 누르면 파일을 옮기지 않고 지금처럼 위치만 연결합니다."
+    );
+    localStorage.setItem(filePlacementNoticeKey, ok ? "1" : "off");
+    if (!ok) return srcPath;
+  }
+  if (localStorage.getItem(filePlacementNoticeKey) === "off") return srcPath;
+
+  const res = await caseDrawerAPI.moveFile(srcPath, joinPath(caseDir, slotFolder(slot)));
+  if (!res?.ok) {
+    alert(`파일을 사례 폴더로 옮기지 못했어요. 원래 위치 그대로 연결합니다.\n\n원인: ${res?.reason || "알 수 없음"}`);
+    return srcPath;
+  }
+  return res.path;
+}
 
 async function sha256Hex(text: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -431,7 +471,7 @@ function ExtraDocList({
             <button onClick={() => onOpen(title, d.path)} className="text-[11px] pl-2 pr-1 py-1 text-gray-600">
               {d.date}{d.sessionNo ? ` · ${d.sessionNo}회차` : ""} · {baseName(d.path)}
             </button>
-            <button onClick={() => { if (window.confirm("이 첨부를 삭제할까요? (원본 파일은 지워지지 않아요)")) onRemove(d.id); }}
+            <button onClick={() => { if (window.confirm("이 첨부를 삭제할까요?\n(연결만 끊는 것이고, 파일은 사례 폴더에 그대로 남아요)")) onRemove(d.id); }}
               title="삭제" className="pr-1.5 pl-0.5 py-1 text-gray-300 hover:text-red-500">
               <Trash2 className="w-3 h-3" />
             </button>
@@ -495,24 +535,34 @@ function EditCaseInfoDialog({
 
 // ── 사례 하나(가로로 긴 버튼 + 드롭다운) ───────────────────────────────
 function CaseRow({
-  data, open, onToggle, onChange, onOpenFile, onDelete, onEditInfo, onOpenDesk,
+  data, open, caseDir, onToggle, onChange, onOpenFile, onDelete, onEditInfo, onOpenDesk,
 }: {
-  data: CaseRecord; open: boolean; onToggle: () => void;
+  data: CaseRecord; open: boolean; caseDir: string | null; onToggle: () => void;
   onChange: (next: CaseRecord) => void;
   onOpenFile: (label: string, path: string) => void;
   onDelete: () => void;
   onEditInfo: () => void;
   onOpenDesk: (tab?: DeskTab) => void;
 }) {
-  const setGenogram = (path: string) => onChange({ ...data, genogram: { path, addedAt: new Date().toISOString() } });
+  // 첨부 파일은 종류에 맞는 사례 하위 폴더로 옮긴 뒤 그 경로를 기록한다(가계도는 "기타").
+  const setGenogram = async (path: string) => {
+    const placed = await placeFile(caseDir, { kind: "etc" }, path);
+    onChange({ ...data, genogram: { path: placed, addedAt: new Date().toISOString() } });
+  };
   const clearGenogram = () => onChange({ ...data, genogram: null });
-  const addPsychTest = (path: string) => onChange({
-    ...data, psychTests: [...data.psychTests, { id: uid(), date: new Date().toISOString().slice(0, 10), path }],
-  });
+  const addPsychTest = async (path: string) => {
+    const placed = await placeFile(caseDir, { kind: "psychTest" }, path);
+    onChange({
+      ...data, psychTests: [...data.psychTests, { id: uid(), date: new Date().toISOString().slice(0, 10), path: placed }],
+    });
+  };
   const removePsychTest = (id: string) => onChange({ ...data, psychTests: data.psychTests.filter((d) => d.id !== id) });
-  const addSupervision = (path: string) => onChange({
-    ...data, supervisions: [...data.supervisions, { id: uid(), date: new Date().toISOString().slice(0, 10), path }],
-  });
+  const addSupervision = async (path: string) => {
+    const placed = await placeFile(caseDir, { kind: "supervision" }, path);
+    onChange({
+      ...data, supervisions: [...data.supervisions, { id: uid(), date: new Date().toISOString().slice(0, 10), path: placed }],
+    });
+  };
   const removeSupervision = (id: string) => onChange({ ...data, supervisions: data.supervisions.filter((d) => d.id !== id) });
   const setBasicInfo = (key: keyof BasicInfo, value: string) =>
     onChange({ ...data, basicInfo: { ...(data.basicInfo || emptyBasicInfo()), [key]: value } });
@@ -528,7 +578,16 @@ function CaseRow({
           <FolderOpen className="w-4 h-4 text-[#3a6a4a] shrink-0" />
           <span className="font-medium text-[#2d1f0e] text-sm truncate">{data.name || "(이름 없음)"}</span>
           <span className="text-xs text-gray-400 shrink-0">상담 시작일 {data.startDate}</span>
-          <span className="text-[11px] text-gray-400 shrink-0">{data.sessions.length}회차</span>
+          {/* 회차 수는 "회차 칸이 몇 개인가"라 빈 칸도 세어진다. 자료가 실제로 붙은 회차 수를 함께
+              보여줘서 "자료를 다 지웠는데 회차가 그대로"로 보이는 혼동을 없앤다(2026-08-06). */}
+          <span className="text-[11px] text-gray-400 shrink-0">
+            {data.sessions.length}회차
+            {(() => {
+              const filled = data.sessions.filter((s) =>
+                s.audio || s.transcriptWord || s.transcriptJson || s.analysis).length;
+              return filled < data.sessions.length ? ` (자료 ${filled})` : "";
+            })()}
+          </span>
         </button>
         {/* 자료 바로가기 — 누르면 사례연구 책상이 그 자료 탭으로 열림 */}
         <div className="shrink-0 hidden md:flex items-center gap-1">
@@ -614,6 +673,22 @@ function CaseRow({
                       onChange({ ...data, sessions });
                     }}
                     className="text-[11px] text-gray-400 border-none bg-transparent" />
+                  {/* 회차 삭제 — 실수로 추가한 회차를 되돌릴 방법이 없었다(2026-08-06 추가).
+                      자료가 붙어 있는 회차는 실수로 지우지 않게 무엇이 사라지는지 알려주고 묻는다. */}
+                  <button
+                    onClick={() => {
+                      const attached = (["audio", "transcriptWord", "transcriptJson", "analysis"] as const)
+                        .filter((k) => (s as any)[k]).length;
+                      const msg = attached > 0
+                        ? `${s.no}회차를 삭제할까요?\n첨부된 자료 ${attached}개의 연결이 함께 사라집니다.\n(파일 자체는 사례 폴더에 그대로 남아요)`
+                        : `${s.no}회차를 삭제할까요?`;
+                      if (!window.confirm(msg)) return;
+                      onChange({ ...data, sessions: data.sessions.filter((_, idx) => idx !== i) });
+                    }}
+                    title="이 회차 삭제"
+                    className="ml-auto shrink-0 text-gray-300 hover:text-red-500 p-0.5">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {([
@@ -625,12 +700,29 @@ function CaseRow({
                     const attach = async () => {
                       const p = await caseDrawerAPI?.selectFile(key === "transcriptWord" ? TRANSCRIPT_DOC_FILTERS : undefined);
                       if (!p) return;
+                      const now = new Date().toISOString();
+                      const slot = { kind: "session", sessionNo: s.no } as const;
+
+                      // 축어록(워드)을 첨부하면 곤글박이가 함께 저장해 둔 짝 파일 "○○_세션.json" 도
+                      // 같은 회기 폴더로 따라오게 한다(그게 있어야 나중에 이어서 편집할 수 있다).
+                      // 원본이 이동되기 전에 옆자리에서 먼저 찾아둔다.
+                      let pairedJson: string | null = null;
+                      if (key === "transcriptWord" && /\.docx$/i.test(p)) {
+                        const candidate = p.replace(/\.docx$/i, "_세션.json");
+                        if (await caseDrawerAPI?.fileExists(candidate)) pairedJson = candidate;
+                      }
+
+                      const placed = await placeFile(caseDir, slot, p);
                       const sessions = [...data.sessions];
-                      sessions[i] = { ...s, [key]: { path: p, addedAt: new Date().toISOString() } };
+                      sessions[i] = { ...s, [key]: { path: placed, addedAt: now } };
+                      if (pairedJson) {
+                        const placedJson = await placeFile(caseDir, slot, pairedJson);
+                        sessions[i] = { ...sessions[i], transcriptJson: { path: placedJson, addedAt: now } };
+                      }
                       onChange({ ...data, sessions });
                     };
                     const clear = () => {
-                      if (!window.confirm(`'${label}' 첨부를 없앨까요? (원본 파일은 지워지지 않아요)`)) return;
+                      if (!window.confirm(`'${label}' 첨부를 없앨까요?\n(연결만 끊는 것이고, 파일은 사례 폴더에 그대로 남아요)`)) return;
                       const sessions = [...data.sessions];
                       sessions[i] = { ...s, [key]: null };
                       onChange({ ...data, sessions });
@@ -1582,7 +1674,7 @@ export default function CaseDrawer() {
     if (openId === id) setOpenId(null);
   };
 
-  const createCase = (draft: CaseRecord) => {
+  const createCase = async (draft: CaseRecord) => {
     const existingNames = new Set(cases.map((c) => c.name));
     let finalName = draft.name;
     if (existingNames.has(finalName)) {
@@ -1598,7 +1690,28 @@ export default function CaseDrawer() {
       while (existingFolders.has(`${folderName}_${n}`)) n++;
       folderName = `${folderName}_${n}`;
     }
-    setCases((prev) => [...prev, { ...draft, name: finalName, folderName }]);
+
+    // 새 사례 만들기 화면에서 미리 붙인 파일들은 이 시점에야 갈 곳(사례 폴더)이 정해진다.
+    // 폴더명이 확정된 지금 제자리로 옮긴다(가계도=기타, 1회차 자료=01회기).
+    let next: CaseRecord = { ...draft, name: finalName, folderName };
+    const caseDir = settings?.rootFolder ? joinPath(settings.rootFolder, folderName) : null;
+    if (caseDir) {
+      if (next.genogram) {
+        const placed = await placeFile(caseDir, { kind: "etc" }, next.genogram.path);
+        next = { ...next, genogram: { ...next.genogram, path: placed } };
+      }
+      const s0 = next.sessions[0];
+      if (s0) {
+        const slot = { kind: "session", sessionNo: s0.no } as const;
+        let updated = { ...s0 };
+        for (const key of ["audio", "transcriptWord", "analysis"] as const) {
+          const ref = updated[key];
+          if (ref) updated = { ...updated, [key]: { ...ref, path: await placeFile(caseDir, slot, ref.path) } };
+        }
+        next = { ...next, sessions: [updated, ...next.sessions.slice(1)] };
+      }
+    }
+    setCases((prev) => [...prev, next]);
   };
 
   const editingCase = cases.find((c) => c.id === editingCaseId) || null;
@@ -1710,6 +1823,7 @@ export default function CaseDrawer() {
       <div className="space-y-2.5">
         {filtered.map((c) => (
           <CaseRow key={c.id} data={c} open={openId === c.id}
+            caseDir={settings.rootFolder ? joinPath(settings.rootFolder, c.folderName) : null}
             onToggle={() => setOpenId(openId === c.id ? null : c.id)}
             onChange={updateCase}
             onOpenFile={(label, path) => setPreviewFile({ label, path })}

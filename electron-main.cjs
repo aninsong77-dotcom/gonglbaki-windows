@@ -101,6 +101,16 @@ function createMainWindow() {
   mainWindow.maximize();
   mainWindow.loadURL(`http://127.0.0.1:${PORT}`);
 
+  // ⚠️임시 진단용 — 한글 조합창 좌상단 문제의 두 번째 원인 추적(원인 확인 후 제거할 것).
+  // 화면 쪽 "[IME진단]" 기록만 파일로 남긴다(상담 내용은 기록하지 않는다 — 위치·스타일 정보만).
+  mainWindow.webContents.on("console-message", (_e, _level, message) => {
+    if (typeof message === "string" && message.startsWith("[IME진단]")) {
+      try {
+        fs.appendFileSync(path.join(require("os").homedir(), "gongulbaki_ime_debug.txt"), message + "\n");
+      } catch {}
+    }
+  });
+
   // 브라우저 기본 줌(Ctrl+휠, Ctrl+±) 전체 비활성화
   mainWindow.webContents.setZoomFactor(1);
   mainWindow.webContents.setVisualZoomLevelLimits(1, 1);
@@ -132,8 +142,16 @@ function createMainWindow() {
 
   mainWindow.on("closed", () => { mainWindow = null; });
 
-  // help.html 창 — 메뉴바 숨기기
+  // 새 창 요청 처리.
+  // 앱 안의 창으로 여는 것은 우리 도움말(127.0.0.1)뿐이고, 바깥 사이트(설정창의 기부처 링크 등)는
+  // 사용자의 기본 브라우저로 넘긴다. 앱 창으로 열면 그 창이 preload.cjs 의 기능(파일 읽기·쓰기 등)을
+  // 물려받아, 바깥 사이트 쪽에 문제가 생겼을 때 사용자 PC 파일에 손댈 수 있는 통로가 되기 때문이다.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    const isLocal = url.startsWith(`http://127.0.0.1:${PORT}`) || url.startsWith(`http://localhost:${PORT}`);
+    if (!isLocal) {
+      if (/^https?:\/\//i.test(url)) shell.openExternal(url); // 기본 브라우저에서 열기
+      return { action: "deny" };
+    }
     return {
       action: "allow",
       overrideBrowserWindowOptions: {
@@ -240,6 +258,49 @@ ipcMain.handle("case-write-text", (_, filePath, content) => {
     return true;
   } catch {
     return false;
+  }
+});
+
+// 사례서랍 파일 자동 정리 — 첨부한 파일을 사례 폴더 안으로 "이동"한다.
+// 상담 자료라 유실되면 안 되므로 rename 한 방으로 처리하지 않는다:
+//   ① 복사 → ② 크기 비교로 온전히 복사됐는지 확인 → ③ 확인된 경우에만 원본 삭제
+// (rename 은 다른 드라이브·USB 사이에서 실패하고, 실패 지점에 따라 파일이 깨질 수 있다.)
+// 반환: { ok, path, moved, reason } — 실패해도 화면은 원래 경로로 첨부를 이어간다.
+ipcMain.handle("case-move-file", (_, srcPath, destDir) => {
+  try {
+    if (!srcPath || !destDir) return { ok: false, path: srcPath, moved: false, reason: "경로 없음" };
+    if (!fs.existsSync(srcPath)) return { ok: false, path: srcPath, moved: false, reason: "원본 파일을 찾을 수 없음" };
+
+    // 이미 목적지 폴더 안에 있는 파일이면 건드리지 않는다(재첨부·중복 이동 방지)
+    const srcDir = path.dirname(path.resolve(srcPath));
+    if (srcDir === path.resolve(destDir)) return { ok: true, path: srcPath, moved: false, reason: "이미 정리된 위치" };
+
+    fs.mkdirSync(destDir, { recursive: true });
+
+    // 같은 이름이 있으면 "이름(2).확장자" 로 비켜 간다 — 기존 파일을 덮어쓰지 않기 위함
+    const ext = path.extname(srcPath);
+    const base = path.basename(srcPath, ext);
+    let dest = path.join(destDir, base + ext);
+    for (let i = 2; fs.existsSync(dest); i++) dest = path.join(destDir, `${base}(${i})${ext}`);
+
+    fs.copyFileSync(srcPath, dest);
+
+    // 복사가 온전한지 확인된 뒤에만 원본을 지운다. 확인이 안 되면 원본을 남긴다(유실 방지).
+    const srcSize = fs.statSync(srcPath).size;
+    const destSize = fs.statSync(dest).size;
+    if (srcSize !== destSize) {
+      try { fs.unlinkSync(dest); } catch {}
+      return { ok: false, path: srcPath, moved: false, reason: "복사 확인 실패" };
+    }
+    try {
+      fs.unlinkSync(srcPath);
+    } catch {
+      // 원본이 열려 있어 못 지우는 경우 — 사본은 정상이므로 정리는 성공으로 보되 사실을 알린다
+      return { ok: true, path: dest, moved: true, reason: "원본이 사용 중이라 지우지 못함(사본은 정리됨)" };
+    }
+    return { ok: true, path: dest, moved: true, reason: "" };
+  } catch (e) {
+    return { ok: false, path: srcPath, moved: false, reason: e?.message || "알 수 없는 오류" };
   }
 });
 

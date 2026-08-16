@@ -594,16 +594,24 @@ def convert_to_wav_eng(src_path: str) -> str:
 
 # ════════════════════════════════════════════════════════════════
 # 분석 기능 (빈출 단어 + 회기 요약) — 전부 온디바이스, 내용은 화면으로만 전달
-# 빈출 단어 = Kiwi 형태소 분석(실제 집계) / 요약 = Kanana-1.5-2.1B(카카오, llama.cpp, AI 초안)
-# 2026-07-09 Qwen3-4B → Kanana 교체: 같은 더미대본 9회 A/B 검증에서 한국어 자연스러움·
-# 속도(2~3배)·용량(2.5→1.5GB) 우세. Apache 2.0. 검증 기록 = 요약모델_테스트/비교결과*.md
+# 빈출 단어 = Kiwi 형태소 분석(실제 집계) / 요약 = Qwen3-4B-Instruct(Qwen팀, llama.cpp, AI 초안)
+# 2026-07-09 Qwen3-4B → Kanana 교체(한국어 자연스러움·속도·용량 우세) 이후,
+# 2026-07-20 채팅 UI 통합 계획(대화형 AI 로드맵)에서 다시 Qwen3-4B로 교체 — 이번엔
+# "회기요약+자유대화 엔진 통일"이 이유. Kanana 대비 품질 회귀 없음 A/B 재검증 완료. Apache 2.0.
+# 검증 기록 = 요약모델_테스트/비교결과*.md, 비교결과_qwen공식변환_2026-07-20.md
 # ════════════════════════════════════════════════════════════════
 
-# 모델 출처: 카카오 공식 원본(kakaocorp/kanana-1.5-2.1b-instruct-2505)을 우리가 직접
-# GGUF 변환·Q4_K_M 양자화해 곤글박이 GitHub 릴리스에 올린 것 — 제3자 변환본 미사용
-# (보안 원칙: 배포 모델은 출처가 깨끗한 파일만. 변환 절차 = 요약모델_테스트/)
-LLM_MODEL_FILE = "kanana-1.5-2.1b-instruct-Q4_K_M.gguf"
-LLM_MODEL_URL = "https://github.com/aninsong77-dotcom/gonglbaki-windows/releases/download/models/" + LLM_MODEL_FILE
+# 모델 출처: Qwen 팀 공식 HuggingFace 저장소(Qwen/Qwen3-4B-GGUF)가 자체 배포한 Q4_K_M —
+# 제3자(Unsloth 등) 변환본 아님, 우리가 직접 변환할 필요 없이 모델 제작사 본인이 낸 파일을
+# 그대로 받는다(2026-07-20, Kanana 때와 달리 공식 양자화본이 이미 존재해 방향 전환).
+# URL은 브랜치(main)가 아니라 특정 커밋 해시로 고정 — 저장소가 나중에 갱신돼도 이 주소가
+# 가리키는 파일 내용은 절대 바뀌지 않는다. 다운로드 후 SHA256 체크섬으로 무결성을 검증한다.
+# (검증 기록 = 요약모델_테스트/비교결과_qwen공식변환_2026-07-20.md)
+LLM_MODEL_FILE = "Qwen3-4B-Q4_K_M.gguf"
+LLM_MODEL_URL = ("https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/"
+                  "bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf")
+LLM_MODEL_SHA256 = "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5"
+LLM_MODEL_SIZE_BYTES = 2497280256  # 공식 배포본 실측 크기(체크섬과 함께 무결성 검증에 사용)
 
 def get_llm_model_path() -> Path:
     return Path(r"C:\whisper-models") / LLM_MODEL_FILE
@@ -634,7 +642,9 @@ _ANALYZE_STOPWORDS = {
 # 지시문 참고: 2차 검증(요약모델_테스트/비교결과_2차_kanana.md)에서 확인된 Kanana 버릇 교정 —
 # ① 문장 수 제한을 무시하고 길게 씀 → "반드시 지켜라" 강조 ② 상담자가 낸 과제를 [내담자]
 # 칸에 섞음 → 소속 규칙 명시 ③ 축어록에 없는 행동(예: 병원 권유)을 상담자가 했다고
-# 서술하는 미세 왜곡 → 금지 문구 추가. (/no_think 는 Qwen 전용 토큰이라 제거)
+# 서술하는 미세 왜곡 → 금지 문구 추가. 이 지시문 자체는 모델 비의존적이라 Qwen 재교체
+# (2026-07-20) 후에도 그대로 유지 — /no_think 토큰은 지시문이 아니라 프롬프트 조립부
+# (_analyze_ask_llm)에서 Qwen ChatML 템플릿에 넣는다(생각과정 숨김, 아래 참고).
 # 축어록 표기 관례: 발언 중 괄호( )는 ①그 순간 상대방이 짧게 끼어든 말(맞장구·짧은 질문)
 # 이거나 ②(웃음)(침묵)(한숨) 같은 비언어 행동이다 — 현재 화자의 말이 아님. 요약 AI가
 # 이를 화자의 발언으로 오인하지 않도록 지시문에 명시(2026-07-09 사용자 요청).
@@ -734,7 +744,9 @@ def _ensure_llama_server() -> bool:
     debug_log(f"요약 서버(모델 상주) 기동 중... (포트 {port})")
     # 컨텍스트 16384: 조각 22개짜리 긴 축어록의 종합(reduce) 입력이 4096을 넘겨
     # exceed_context_size_error(400)로 빈 결과가 나온 실사고(2026-07-09)에서 확장.
-    # Kanana는 32k까지 지원, 2.1B라 메모리 부담도 크지 않음.
+    # Qwen3-4B는 네이티브 32768(YaRN으로 131072까지) 지원해 16384는 안전하게 여유 있음.
+    # 4B는 2.1B(Kanana)보다 파라미터가 커 KV 캐시 메모리 사용량이 늘지만, 조각 20개+
+    # 실사용 크기 SSE 완주 검증(2026-07-20)에서 문제 없음을 확인.
     proc = subprocess.Popen(
         [str(exe), "-m", str(get_llm_model_path()),
          "--host", "127.0.0.1", "--port", str(port), "-c", "16384"],
@@ -766,10 +778,17 @@ def _analyze_ask_llm(system, user, max_tokens=500):
     if not _ensure_llama_server():
         debug_log("[오류] 요약 서버 기동 실패 — 모델 파일 또는 실행파일 없음")
         return ""
-    # Kanana 1.5 = Llama3 계열 채팅 양식 (Qwen의 ChatML과 다름 — 잘못 넣으면 품질 왜곡)
-    prompt = (f"<|start_header_id|>system<|end_header_id|>\n\n{system}<|eot_id|>"
-              f"<|start_header_id|>user<|end_header_id|>\n\n{user}<|eot_id|>"
-              f"<|start_header_id|>assistant<|end_header_id|>\n\n")
+    # Qwen3 = ChatML 양식. 처음엔 "/no_think"를 시스템 메시지에 붙이는 방식으로 했으나
+    # A/B 검증(2026-07-20, 비교결과_qwen공식변환_2026-07-20.md 시나리오B)에서 이 방식이
+    # 느슨한 힌트에 불과해 가끔 안 먹히고 영어 사고과정 원문이 그대로 응답에 새어나오는
+    # 오류가 재현됨(계획서 §3.2 지시문 조정 절차 적용). 원인: Qwen 공식 챗템플릿을 직접
+    # 확인한 결과(HF 토크나이저 apply_chat_template(enable_thinking=False) 실측), 진짜
+    # 공식 메커니즘은 "/no_think 힌트"가 아니라 프롬프트에 빈 <think>\n\n</think>\n\n
+    # 블록을 미리 채워 넣어 모델이 아예 사고할 틈을 안 주는 것 — 이 방식으로 교체하니
+    # 같은 시나리오에서 재발 없음 확인(재검증 완료).
+    prompt = (f"<|im_start|>system\n{system}<|im_end|>\n"
+              f"<|im_start|>user\n{user}<|im_end|>\n"
+              f"<|im_start|>assistant\n<think>\n\n</think>\n\n")
     body = _json.dumps({"prompt": prompt, "n_predict": max_tokens,
                         "temperature": 0.3, "stream": False}).encode("utf-8")
     req = urllib.request.Request(f"http://127.0.0.1:{_llama_server['port']}/completion",
@@ -800,8 +819,10 @@ def _analyze_ask_llm(system, user, max_tokens=500):
 def _reduce_partials(sys_msg, partials, max_tokens=800):
     """부분 요약들을 종합. 아주 긴 회기(부분 요약 수십 개)는 한 번에 넣으면 컨텍스트를
     초과하므로, 묶음별로 먼저 종합한 뒤 그 결과를 다시 종합한다(2단계).
-    글자 수 한도 16000자 ≈ 9천 토큰(Kanana 토크나이저 실측 약 0.56토큰/자) — 16384 컨텍스트에 안전."""
-    LIMIT = 16000
+    글자 수 한도 12000자 ≈ 8400 토큰(Qwen3 토크나이저 실측 약 0.70토큰/자, 한국어 기준 —
+    Kanana 0.56 대비 토큰 밀도가 높아 16000자→12000자로 하향, 2026-07-20 재계산) —
+    16384 컨텍스트에서 시스템 메시지·생성분(최대 800토큰) 포함해도 충분한 여유."""
+    LIMIT = 12000
     text = "부분 요약들:\n\n" + "\n\n".join(partials)
     if len(text) <= LIMIT:
         return _analyze_ask_llm(sys_msg, text, max_tokens)
@@ -834,20 +855,60 @@ def analyze_status():
         llm_model=get_llm_model_path().exists(),
         llama_exe=get_llama_exe().exists(),
         kiwi=kiwi_ok,
-        model_size_mb=1452,
+        model_size_mb=round(LLM_MODEL_SIZE_BYTES / (1024 * 1024)),
     )
+
+def _sha256_of_file(path: Path) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(1024 * 1024 * 8)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
 
 @app.get("/api/analyze/model/download")
 def analyze_model_download():
-    """요약 모델(Kanana-1.5-2.1B, 약 1.5GB) SSE 다운로드 — cpp 모델 다운로드와 동일 패턴"""
+    """요약 모델(Qwen3-4B-Q4_K_M, Qwen 공식 HuggingFace 배포본, 약 2.4GB) SSE 다운로드.
+    2026-07-20 공식 HF 직접 다운로드로 전환하며 이어받기(Range 헤더)·체크섬 검증 추가 —
+    2.4GB급 다운로드라 중간에 끊길 가능성이 커, 끊긴 지점(.part 임시 파일)부터 이어받고
+    완료 후 SHA256이 공식 배포본과 일치하는지 확인한다(변조·손상 감지)."""
     import json, queue, urllib.request
     q = queue.Queue()
     Path(r"C:\whisper-models").mkdir(parents=True, exist_ok=True)
     dest = get_llm_model_path()
+    part = dest.with_name(dest.name + ".part")  # 다운로드 중 임시 파일 — 완료 후 dest로 이름 변경
 
     def do_download():
         try:
-            urllib.request.urlretrieve(LLM_MODEL_URL, dest)
+            existing = part.stat().st_size if part.exists() else 0
+            if existing >= LLM_MODEL_SIZE_BYTES:
+                existing = 0  # 예전 잔재가 이미 완결 크기 이상이면 신뢰하지 않고 처음부터
+            headers = {}
+            if existing:
+                headers["Range"] = f"bytes={existing}-"
+                debug_log(f"모델 다운로드 이어받기 시도: {existing}바이트부터")
+            req = urllib.request.Request(LLM_MODEL_URL, headers=headers)
+            with urllib.request.urlopen(req, timeout=30) as r:
+                resumed = bool(existing) and r.status == 206
+                if existing and not resumed:
+                    debug_log("서버가 이어받기(Range)를 지원하지 않아 처음부터 다시 받습니다.")
+                with open(part, "ab" if resumed else "wb") as f:
+                    while True:
+                        chunk = r.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+            digest = _sha256_of_file(part)
+            if digest != LLM_MODEL_SHA256:
+                part.unlink(missing_ok=True)
+                debug_log(f"[오류] 모델 다운로드 체크섬 불일치 (받은 값 {digest[:12]}...)")
+                q.put({"type": "error", "msg": "다운로드한 파일이 손상됐어요(체크섬이 맞지 않아요). 다시 시도해주세요."})
+                return
+            part.replace(dest)
+            debug_log("모델 다운로드 완료 — 체크섬 확인됨")
             q.put({"type": "done"})
         except Exception as e:
             q.put({"type": "error", "msg": str(e)})
@@ -856,14 +917,15 @@ def analyze_model_download():
         yield "data: " + json.dumps({"type": "start"}) + "\n\n"
         t = threading.Thread(target=do_download, daemon=True)
         t.start()
+        total_mb = round(LLM_MODEL_SIZE_BYTES / (1024 * 1024))
         while True:
             try:
                 result = q.get(timeout=5)
                 yield "data: " + json.dumps(result) + "\n\n"
                 break
             except queue.Empty:
-                done_mb = dest.stat().st_size // (1024*1024) if dest.exists() else 0
-                yield "data: " + json.dumps({"type": "progress", "done_mb": done_mb, "total_mb": 1452}) + "\n\n"
+                done_mb = part.stat().st_size // (1024 * 1024) if part.exists() else 0
+                yield "data: " + json.dumps({"type": "progress", "done_mb": done_mb, "total_mb": total_mb}) + "\n\n"
 
     return Response(stream_with_context(generate()), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -871,11 +933,15 @@ def analyze_model_download():
 @app.delete("/api/analyze/model/delete")
 def analyze_model_delete():
     p = get_llm_model_path()
-    if not p.exists():
+    part = p.with_name(p.name + ".part")
+    if not p.exists() and not part.exists():
         return jsonify(error="모델 파일이 없습니다."), 404
     _stop_llama_server()  # 상주 서버가 모델 파일을 잡고 있으면 삭제가 실패하므로 먼저 내림
     try:
-        p.unlink()
+        if p.exists():
+            p.unlink()
+        if part.exists():  # 중단된 다운로드 잔재도 함께 정리
+            part.unlink()
         return jsonify(ok=True)
     except Exception as e:
         return jsonify(error=str(e)), 500

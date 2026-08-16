@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld("caseDrawerAPI", {
   mkdir:       (dirPath) => ipcRenderer.invoke("case-mkdir", dirPath),
   writeText:   (filePath, content) => ipcRenderer.invoke("case-write-text", filePath, content),
   selectFile:  (filters) => ipcRenderer.invoke("case-select-file", filters),
+  // 첨부 파일을 사례 폴더로 이동(복사→검증→원본 삭제). 실패해도 첨부는 원래 경로로 이어진다.
+  moveFile:    (srcPath, destDir) => ipcRenderer.invoke("case-move-file", srcPath, destDir),
   readText:    (filePath) => ipcRenderer.invoke("case-read-text", filePath),
   readBinary:  (filePath) => ipcRenderer.invoke("case-read-binary", filePath),
   fileExists:  (filePath) => ipcRenderer.invoke("case-file-exists", filePath),

@@ -1,13 +1,11 @@
-import { useEffect, useRef, useState, useCallback, Fragment } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, memo, Fragment } from "react";
+import { flushSync } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
 import {
   Play, Pause, Upload, Save, Settings,
   Cpu, ShieldCheck, Clock, SkipBack, SkipForward, Undo2, Redo2, BookOpen, Pencil, HelpCircle, BarChart3, Hourglass,
@@ -39,6 +37,57 @@ const fmt = (s: number) => {
 };
 
 const nextSpeakerOf = (s: Speaker): Speaker => s === "C" ? "P" : "C";
+
+// ── 축어록 한 줄 편집칸 ──────────────────────────────────────────────
+// 사용자가 손으로 직접 고치는 칸이라, 이 안의 글자까지 리액트가 관리하게 두면
+// 화면이 다시 그려질 때 글자 덩어리가 통째로 갈리고, 커서는 이미 떨어져 나간 옛 덩어리를
+// 가리킨 채 남는다. 그러면 커서가 안 보이고, 한글 조합창이 화면 좌상단 구석으로 떨어지고,
+// 기호가 안 써진다(선택·삭제만 되는 상태).
+// 그래서 글자를 리액트 자식으로 두지 않고, 상태가 실제로 달라졌을 때만 직접 맞춰 넣는다.
+// 편집 중인(포커스가 있는) 칸은 아예 건드리지 않고 미뤄뒀다가 포커스가 빠질 때 반영한다.
+type LineHandlers = {
+  onSplitKey: (e: React.KeyboardEvent<HTMLDivElement>, id: number) => void;
+  onCommit: (id: number, text: string) => void;
+};
+
+const EditableLine = memo(({ line, handlersRef }: {
+  line: Line;
+  handlersRef: React.MutableRefObject<LineHandlers>;
+}) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const pendingRef = useRef<string | null>(null);
+  const col = speakerColor(line.speaker);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (el.textContent === line.text) { pendingRef.current = null; return; }
+    if (document.activeElement === el) { pendingRef.current = line.text; return; }
+    el.textContent = line.text;
+    pendingRef.current = null;
+  }, [line.text]);
+
+  const handleBlur = () => {
+    const el = ref.current;
+    if (!el) return;
+    if (pendingRef.current !== null) {
+      // 편집 중이라 미뤄둔 프로그램 쪽 변경(줄 분할·변환 이어붙임 등)을 이제 반영한다.
+      // 이때 화면에 있던 옛 내용을 상태로 되밀면 그 변경이 도로 지워지므로 하지 않는다.
+      el.textContent = pendingRef.current;
+      pendingRef.current = null;
+      return;
+    }
+    handlersRef.current.onCommit(line.id, el.textContent || "");
+  };
+
+  return (
+    <div ref={ref} contentEditable suppressContentEditableWarning data-line-id={line.id}
+      onKeyDown={e => handlersRef.current.onSplitKey(e, line.id)}
+      onBlur={handleBlur}
+      className="min-h-[1.8rem] px-3 py-1 rounded-lg leading-relaxed text-[15px] outline-none transition-colors break-words focus:ring-2 focus:ring-[#3a6a4a]/40 focus:shadow-sm"
+      style={{ background: col.bg + "55", borderLeft: `3px solid ${col.border}`, wordBreak: "break-word", overflowWrap: "break-word", caretColor: "#e11d48", caretShape: "underscore" } as React.CSSProperties} />
+  );
+});
 
 const playDing = async () => {
   try {
@@ -126,43 +175,26 @@ const electronAPI = (window as any).electronAPI as {
 type ModelStatus = { cached: boolean; loaded: boolean };
 type ModelsState = Record<string, ModelStatus>;
 
-const MODEL_INFO: { key: string; label: string; size: string; desc: string }[] = [
-  { key: "small",    label: "Small",    size: "약 500MB", desc: "빠름" },
-  { key: "medium",   label: "Medium",   size: "약 1.5GB", desc: "권장 ★" },
-  { key: "large-v3", label: "Large-v3", size: "약 6GB",   desc: "최고 정확도" },
-];
+// (모델 목록 MODEL_INFO 는 제거 — 2026-07 단일화로 small/medium/large-v3 선택이 없어졌다)
 
 type Engine = "python" | "cpp";
 
-function ModelManager({
-  currentModel, onModelChange,
-  currentEngine, onEngineChange,
-}: {
-  currentModel: string; onModelChange: (m: string) => void;
-  currentEngine: Engine; onEngineChange: (e: Engine) => void;
-}) {
-  const [modelsState, setModelsState]     = useState<ModelsState>({});
+function ModelManager({ currentEngine }: { currentEngine: Engine }) {
   const [cppModelsState, setCppModelsState] = useState<ModelsState>({});
   const [downloading, setDownloading]     = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadError, setDownloadError] = useState("");
-  const [deleting, setDeleting]           = useState<string | null>(null);
 
+  // 화면에 보여줄 상태는 whisper.cpp 쪽 하나뿐이다(2026-07 단일화). 예전엔 파이썬 엔진 상태도
+  // 같이 받아왔는데 쓰이는 곳이 없어 요청만 낭비였다 — 제거(2026-08-06).
   const fetchStatus = async () => {
     try {
-      const [r1, r2] = await Promise.all([
-        fetch("http://127.0.0.1:5577/api/models/status"),
-        fetch("http://127.0.0.1:5577/api/models/cpp/status"),
-      ]);
-      setModelsState(await r1.json());
-      setCppModelsState(await r2.json());
+      const r = await fetch("http://127.0.0.1:5577/api/models/cpp/status");
+      setCppModelsState(await r.json());
     } catch {}
   };
 
   useEffect(() => { fetchStatus(); }, []);
-
-  // 현재 엔진에 따라 상태 선택
-  const activeState = currentEngine === "cpp" ? cppModelsState : modelsState;
 
   const handleDownload = (key: string) => {
     setDownloading(key);
@@ -193,24 +225,9 @@ function ModelManager({
     };
   };
 
-  const handleDelete = async (key: string) => {
-    const isCurrent = currentModel === key;
-    const msg = isCurrent
-      ? `현재 사용 중인 ${key} 모델을 삭제하시겠습니까?\n다음 변환 시 다른 모델이 자동으로 선택됩니다.`
-      : `${key} 모델을 삭제하시겠습니까?\n삭제 후 다시 사용하려면 재다운로드가 필요합니다.`;
-    if (!window.confirm(msg)) return;
-    setDeleting(key);
-    try {
-      const url = currentEngine === "cpp"
-        ? `http://127.0.0.1:5577/api/models/cpp/delete/${key}`
-        : `http://127.0.0.1:5577/api/models/delete/${key}`;
-      const res = await fetch(url, { method: "DELETE" });
-      const data = await res.json();
-      if (!res.ok) { alert(data.error || "삭제 실패"); }
-      else { fetchStatus(); }
-    } catch { alert("삭제 중 오류가 발생했습니다."); }
-    setDeleting(null);
-  };
+  // 변환 모델 삭제 기능은 제거(2026-08-06). 2026-07 에 변환 모델을 large-v3-turbo 하나로 통일하면서
+  // 선택·삭제 UI 가 사라졌고, 모델이 하나뿐이라 지웠다 다시 받을 이유가 없다(사용자 확인).
+  // 요약 모델은 선택 설치라 삭제 기능이 따로 있다(SummaryModelSettings).
 
   // 2026-07 단일화: 변환 모델 = whisper.cpp large-v3-turbo 하나. 선택 UI 대신 설명을 보여준다.
   const TURBO_KEY = "large-v3-turbo";
@@ -289,11 +306,16 @@ function SummaryModelSettings() {
   const [ready, setReady] = useState<boolean | null>(null);
   const [dl, setDl] = useState(false);
   const [dlMb, setDlMb] = useState(0);
+  // 요약 모델 용량(MB) — 백엔드 실제 값(analyze_status의 model_size_mb)을 그대로 반영.
+  // 모델 교체 때마다 이 파일을 다시 열어 숫자를 고칠 필요가 없도록 하드코딩 제거(2026-07-20).
+  const [totalMb, setTotalMb] = useState<number | null>(null);
+  const totalGb = totalMb ? (totalMb / 1024).toFixed(1) : "2.3";
   const refresh = async () => {
     try {
       const r = await fetch("http://127.0.0.1:5577/api/analyze/status");
       const d = await r.json();
       setReady(!!d.llm_model);
+      if (typeof d.model_size_mb === "number") setTotalMb(d.model_size_mb);
     } catch { setReady(null); }
   };
   useEffect(() => { refresh(); }, []);
@@ -309,7 +331,7 @@ function SummaryModelSettings() {
         for (const p of parts) {
           if (!p.startsWith("data:")) continue;
           const d = JSON.parse(p.slice(5).trim());
-          if (d.type === "progress") setDlMb(d.done_mb);
+          if (d.type === "progress") { setDlMb(d.done_mb); if (typeof d.total_mb === "number") setTotalMb(d.total_mb); }
           else if (d.type === "done") setReady(true);
           else if (d.type === "error") throw new Error(d.msg);
         }
@@ -317,7 +339,7 @@ function SummaryModelSettings() {
     } catch { /* 오류 시 상태 유지 */ } finally { setDl(false); refresh(); }
   };
   const remove = async () => {
-    if (!window.confirm("요약 모델(약 1.5GB)을 삭제할까요?\n다시 쓰려면 재다운로드가 필요합니다.")) return;
+    if (!window.confirm(`요약 모델(약 ${totalGb}GB)을 삭제할까요?\n다시 쓰려면 재다운로드가 필요합니다.`)) return;
     try { await fetch("http://127.0.0.1:5577/api/analyze/model/delete", { method: "DELETE" }); } catch {}
     refresh();
   };
@@ -330,15 +352,15 @@ function SummaryModelSettings() {
             <button onClick={remove} className="text-[10px] px-2 py-0.5 rounded-full border border-gray-200 text-gray-400 hover:text-red-500 hover:border-red-300 transition-colors">🗑️ 요약 모델 삭제</button>
           )}
           {ready === false && !dl && (
-            <button onClick={download} className="text-[10px] px-2.5 py-1 rounded-full bg-[#3a6a4a] text-white hover:bg-[#2d5a3a] transition-colors font-medium">📥 요약 모델 (1.5GB)</button>
+            <button onClick={download} className="text-[10px] px-2.5 py-1 rounded-full bg-[#3a6a4a] text-white hover:bg-[#2d5a3a] transition-colors font-medium">📥 요약 모델 ({totalGb}GB)</button>
           )}
-          {dl && <span className="text-[10px] text-gray-400">다운로드 중... {dlMb}MB/2382MB</span>}
+          {dl && <span className="text-[10px] text-gray-400">다운로드 중... {dlMb}MB/{totalMb ?? "?"}MB</span>}
         </div>
       </div>
       <div className="text-[11px] text-gray-500 leading-relaxed space-y-1">
         <p><b className="text-gray-600">빈출 단어</b> · 한국어 형태소 분석기(Kiwi)가 문장을 단어 단위로 분해해 실제 등장 횟수를 셉니다. AI의 의견이 아니라 <b className="text-gray-600">집계 결과</b>라 그대로 신뢰할 수 있고, 화자 분리 후에는 내담자·상담자별로 나뉩니다.</p>
-        <p><b className="text-gray-600">회기 요약</b> · 온디바이스 언어모델(카카오 Kanana, Apache 2.0 공개 라이선스)이 축어록을 구간별로 읽고 종합합니다. 요약은 어디까지나 <b className="text-gray-600">초안</b> — 상담적 판단과 해석은 반드시 상담자의 검토를 거쳐야 합니다.</p>
-        <p>두 기능 모두 이 컴퓨터 안에서만 작동하며, 축어록과 분석 결과는 어떤 서버로도 전송되지 않습니다. 요약 모델은 선택 설치(1회 1.5GB)로, 받지 않아도 빈출 단어 정리는 사용할 수 있어요.</p>
+        <p><b className="text-gray-600">회기 요약</b> · 온디바이스 언어모델(Qwen3-4B, Qwen 팀 공식 배포, Apache 2.0 공개 라이선스)이 축어록을 구간별로 읽고 종합합니다. 요약은 어디까지나 <b className="text-gray-600">초안</b> — 상담적 판단과 해석은 반드시 상담자의 검토를 거쳐야 합니다.</p>
+        <p>두 기능 모두 이 컴퓨터 안에서만 작동하며, 축어록과 분석 결과는 어떤 서버로도 전송되지 않습니다. 요약 모델은 선택 설치(1회 약 {totalGb}GB)로, 받지 않아도 빈출 단어 정리는 사용할 수 있어요.</p>
       </div>
     </div>
   );
@@ -682,35 +704,16 @@ export default function Index() {
   const modeRef = useRef(mode);
   useEffect(() => { modeRef.current = mode; }, [mode]);
 
-  // 편집 커서 위치 표식(긴 줄에서 커서 찾기용) — 커서 좌표를 "읽기만" 해서
-  // 두꺼운 세로 막대(+위쪽 삼각형)를 덧그림. 텍스트 편집 동작에는 일절 개입하지 않음.
-  const [caretPos, setCaretPos] = useState<{ x: number; y: number; h: number } | null>(null);
-  useEffect(() => {
-    const update = () => {
-      const el = document.activeElement as HTMLElement | null;
-      if (!el || !el.hasAttribute || !el.hasAttribute("data-line-id")) { setCaretPos(null); return; }
-      const sel = document.getSelection();
-      if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) { setCaretPos(null); return; }
-      const range = sel.getRangeAt(0);
-      let rect: { left: number; top: number; height: number } | null = null;
-      const rects = range.getClientRects();
-      if (rects.length > 0) rect = rects[0];
-      else {
-        const br = range.getBoundingClientRect();
-        if (br && (br.left !== 0 || br.top !== 0)) rect = br;
-        else { const er = el.getBoundingClientRect(); rect = { left: er.left + 14, top: er.top + 5, height: 22 }; } // 빈 줄
-      }
-      setCaretPos(rect ? { x: rect.left, y: rect.top, h: rect.height || 22 } : null);
-    };
-    document.addEventListener("selectionchange", update);
-    window.addEventListener("scroll", update, true);
-    window.addEventListener("resize", update);
-    return () => {
-      document.removeEventListener("selectionchange", update);
-      window.removeEventListener("scroll", update, true);
-      window.removeEventListener("resize", update);
-    };
-  }, []);
+  // raw 모드 textarea(controlled)는 변환 서버가 실시간 스트리밍으로 계속 값을 덮어쓰는데,
+  // 그 순간 사용자가 한글을 조합 중이면 React가 조합 중인 값을 강제로 다시 써서
+  // IME 조합창이 좌상단 구석에 떨어져 붙박이는 문제가 있었음. 조합 중엔 반영을 미뤘다가
+  // 조합이 끝나는 순간 한 번에 따라잡는다.
+  const rawComposingRef = useRef(false);
+  const pendingRawTextRef = useRef<string | null>(null);
+
+  // 지금 편집 중인 줄 밑줄 표시는 리액트 상태가 아니라 index.css 의 [data-line-id]:focus 규칙으로
+  // 처리한다 — 상태로 그리면 포커스·타이핑마다 리액트가 다시 그리게 되고, 그게 한글 IME 조합을
+  // 깨뜨리는 원인이었다(2026-07-19 커서표시 기능에서 시작된 문제).
   const [showResumeSplitModal, setShowResumeSplitModal] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const showToast = (msg: string) => {
@@ -798,9 +801,6 @@ export default function Index() {
   }, [errorMsg]);
   const abortControllerRef = useRef<AbortController | null>(null);
   const transcribeReqIdRef = useRef<string | null>(null); // 서버 측 변환 작업 ID (진짜 중지용)
-  // 재생 위치 ↔ 텍스트 매칭용 시간표 (표시 전용 — 편집/저장 로직과 무관, 세션 저장에도 안 들어감)
-  const segTimeMapRef = useRef<{ t: number; text: string }[]>([]);
-
   const cancelConvert = () => {
     // 서버의 whisper-cli 프로세스까지 실제로 종료 (연결만 끊으면 좀비로 계속 돌아감)
     const reqId = transcribeReqIdRef.current;
@@ -834,6 +834,8 @@ export default function Index() {
   const [analyzeModelReady, setAnalyzeModelReady] = useState<boolean | null>(null); // 요약 모델 존재?
   const [analyzeDownloading, setAnalyzeDownloading] = useState(false);
   const [analyzeDlMb, setAnalyzeDlMb] = useState(0);
+  // 요약 모델 총 용량(MB) — 백엔드 실제 값 반영, 모델 교체 시 하드코딩 갱신 불필요(2026-07-20)
+  const [analyzeTotalMb, setAnalyzeTotalMb] = useState<number | null>(null);
   const [analyzeFresh, setAnalyzeFresh] = useState(false);          // 새 결과 뱃지
   const [wordPreview, setWordPreview] = useState<{ word: string; sentences: string[] } | null>(null);
   const analyzePartialsRef = useRef<string[]>([]);                  // 조각 요약 보관 → 화자별 전환 재활용
@@ -879,6 +881,7 @@ export default function Index() {
       const r = await fetch("http://127.0.0.1:5577/api/analyze/status");
       const d = await r.json();
       setAnalyzeModelReady(!!d.llm_model);
+      if (typeof d.model_size_mb === "number") setAnalyzeTotalMb(d.model_size_mb);
       return !!d.llm_model;
     } catch { setAnalyzeModelReady(false); return false; }
   };
@@ -895,7 +898,7 @@ export default function Index() {
         for (const p of parts) {
           if (!p.startsWith("data:")) continue;
           const d = JSON.parse(p.slice(5).trim());
-          if (d.type === "progress") setAnalyzeDlMb(d.done_mb);
+          if (d.type === "progress") { setAnalyzeDlMb(d.done_mb); if (typeof d.total_mb === "number") setAnalyzeTotalMb(d.total_mb); }
           else if (d.type === "done") { setAnalyzeModelReady(true); showToast("요약 모델 다운로드 완료!"); }
           else if (d.type === "error") throw new Error(d.msg);
         }
@@ -1024,18 +1027,12 @@ export default function Index() {
 
   // 시작 시 자동복원 제거 — 종료 시 데이터 초기화로 대체
 
-  useEffect(() => { if (rawText) localStorage.setItem("gb_autosave_raw", rawText); }, [rawText]);
-
-  // 종료 시 초기화 — 변환 중이 아닐 때만 (이어받기 데이터는 그대로 유지)
-  useEffect(() => {
-    const onUnload = () => {
-      if (!localStorage.getItem("gb_convert_progress")) {
-        localStorage.removeItem("gb_autosave_raw");
-      }
-    };
-    window.addEventListener("beforeunload", onUnload);
-    return () => window.removeEventListener("beforeunload", onUnload);
-  }, []);
+  // gb_autosave_raw 저장 제거(2026-08-06).
+  // 예전엔 앱을 다시 켤 때 작업 내용을 복원하는 기능이 있었는데, 이전 상담 내용이 그대로 보이는 게
+  // 문제라 복원 기능만 없애고 저장하는 코드는 남아 있었다. 그래서 아무도 읽지 않는 데이터를
+  // 문장마다·타이핑마다 축어록 전체를 통째로 다시 쓰고 있었다(낭비 + 저장공간 초과 시 화면이 죽을 위험
+  // + 비정상 종료 시 상담 내용이 남을 여지). 저장 자체를 없앤다.
+  // 아래 removeItem 들은 옛 버전에서 남았을 수 있는 데이터를 치우는 용도로 그대로 둔다.
 
   useEffect(() => {
     const a = audioRef.current; if (!a) return;
@@ -1067,13 +1064,19 @@ export default function Index() {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       const editing = tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable;
+      // 한글을 조합하는 중(아직 글자가 완성되지 않은 상태)에는 단축키가 끼어들지 않는다.
+      // 조합 중의 키를 가로채면 입력기와 화면이 어긋나, 커서가 사라지고 조합창이 화면 구석으로
+      // 떨어지고 기호가 안 써지는 상태가 된다. (같은 이유로 handleSplitKey 에도 같은 장치가 있다.)
+      if (e.isComposing || e.keyCode === 229) return;
       // Shift+Space: 편집 중/밖 모두 재생/멈춤
       if (e.code === "Space" && e.shiftKey) { e.preventDefault(); togglePlay(); return; }
       // Shift+←/→: 편집 중/밖 모두 3초 이동
       if (e.key === "ArrowLeft" && e.shiftKey) { e.preventDefault(); seek(-3); return; }
       if (e.key === "ArrowRight" && e.shiftKey) { e.preventDefault(); seek(3); return; }
       // Esc: 편집 중/밖 모두 재생/멈춤 (기존 유지)
-      if (e.key === "Escape") { e.preventDefault(); togglePlay(); return; }
+      // 단 편집 중일 때는 기본 동작을 막지 않는다 — Esc 는 한글 입력기가 만들다 만 글자를
+      // 정리하는 키라서, 가로막으면 조합이 어중간하게 끊긴 채 남는다.
+      if (e.key === "Escape") { if (!editing) e.preventDefault(); togglePlay(); return; }
       // Ctrl/Cmd+S: 편집 중/밖 모두 빠른 저장 (브라우저 기본 저장 다이얼로그 대체)
       if ((e.key === "s" || e.key === "S") && (e.ctrlKey || e.metaKey)) { e.preventDefault(); quickSaveRef.current(); return; }
       // 편집 중이면 이하 단축키 비활성
@@ -1133,6 +1136,10 @@ export default function Index() {
   };
 
   const handleSplitKey = (e: React.KeyboardEvent<HTMLDivElement>, lineId: number) => {
+    // 한글 조합 확정 시점의 Enter가 여기로 들어오면 preventDefault+Selection 조작이
+    // 조합 도중 끼어들어 IME 조합창이 깨지는 원인이 될 수 있어,
+    // 조합이 진행 중인 keydown(브라우저 공통 신호 keyCode 229 포함)은 항상 건너뛴다.
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     // ── Enter: 줄 분할 ──────────────────────────────────────────
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -1147,16 +1154,23 @@ export default function Index() {
         pre.setEnd(range.endContainer, range.endOffset);
         cursor = pre.toString().length;
       }
-      setLinesWithHistory(prev => {
-        const idx = prev.findIndex(l => l.id === lineId);
-        if (idx < 0) return prev;
-        const cur = prev[idx];
-        const head = [...prev.slice(0, idx), { ...cur, text: full.slice(0, cursor).trim() }];
-        const sp: Speaker = nextSpeakerOf(cur.speaker);
-        const newLine: Line = { id: Date.now(), speaker: sp, index: nextIndexFor(head, sp), time: current, text: full.slice(cursor).trim() };
-        setTimeout(() => document.querySelector<HTMLDivElement>(`[data-line-id="${newLine.id}"]`)?.focus(), 0);
-        return [...head, newLine, ...prev.slice(idx + 1)];
+      // 새 줄 id를 미리 정해두고 flushSync로 상태 변경을 동기적으로 커밋한 뒤,
+      // 같은 이벤트 처리 안에서 바로 포커스를 옮긴다 — 예전엔 setTimeout(0)으로
+      // 다음 틱에 포커스를 옮겼는데, 그 틈에 사용자가 바로 이어친 키(예: 마침표)가
+      // 포커스가 옮겨지기 전에 도착해 아무 데도 안 들어가고 사라지는 레이스가 있었다.
+      const newLineId = Date.now();
+      flushSync(() => {
+        setLinesWithHistory(prev => {
+          const idx = prev.findIndex(l => l.id === lineId);
+          if (idx < 0) return prev;
+          const cur = prev[idx];
+          const head = [...prev.slice(0, idx), { ...cur, text: full.slice(0, cursor).trim() }];
+          const sp: Speaker = nextSpeakerOf(cur.speaker);
+          const newLine: Line = { id: newLineId, speaker: sp, index: nextIndexFor(head, sp), time: current, text: full.slice(cursor).trim() };
+          return [...head, newLine, ...prev.slice(idx + 1)];
+        });
       });
+      document.querySelector<HTMLDivElement>(`[data-line-id="${newLineId}"]`)?.focus();
       return;
     }
 
@@ -1173,31 +1187,48 @@ export default function Index() {
 
       e.preventDefault();
       const currentText = el.textContent || "";
-      setLinesWithHistory(prev => {
-        const idx = prev.findIndex(l => l.id === lineId);
-        if (idx <= 0) return prev; // 첫 줄은 합칠 이전 줄 없음
-        const prevLine = prev[idx - 1];
-        const mergePoint = prevLine.text.length;
-        const merged = prevLine.text + currentText;
-        const newLines = renumber([
-          ...prev.slice(0, idx - 1),
-          { ...prevLine, text: merged },
-          ...prev.slice(idx + 1),
-        ]);
-        setTimeout(() => {
-          const prevEl = document.querySelector<HTMLDivElement>(`[data-line-id="${prevLine.id}"]`);
-          if (prevEl) { prevEl.focus(); setCursorAt(prevEl, mergePoint); }
-        }, 0);
-        return newLines;
+      // 위 Enter 분기와 같은 이유로 setTimeout 대신 flushSync — 포커스 이동 전에
+      // 이어친 키가 새는 레이스를 없앤다.
+      let mergedIntoId: number | null = null;
+      let mergedIntoPoint = 0;
+      flushSync(() => {
+        setLinesWithHistory(prev => {
+          const idx = prev.findIndex(l => l.id === lineId);
+          if (idx <= 0) return prev; // 첫 줄은 합칠 이전 줄 없음
+          const prevLine = prev[idx - 1];
+          const mergePoint = prevLine.text.length;
+          const merged = prevLine.text + currentText;
+          const newLines = renumber([
+            ...prev.slice(0, idx - 1),
+            { ...prevLine, text: merged },
+            ...prev.slice(idx + 1),
+          ]);
+          mergedIntoId = prevLine.id;
+          mergedIntoPoint = mergePoint;
+          return newLines;
+        });
       });
+      if (mergedIntoId !== null) {
+        const prevEl = document.querySelector<HTMLDivElement>(`[data-line-id="${mergedIntoId}"]`);
+        if (prevEl) { prevEl.focus(); setCursorAt(prevEl, mergedIntoPoint); }
+      }
     }
   };
 
-  const updateText = (id: number, text: string) => {
+  const updateText = (id: number, rawValue: string) => {
+    // 편집을 마칠 때(포커스가 빠질 때) 공백을 정리한다 — 변환 결과를 이어붙이거나 문장을 지우다 보면
+    // 공백이 두 칸 이상 남아 "묘하게 넓게 띄어진" 자리가 생기는데, 저장·워드 출력에서도 그대로 남는다.
+    // 줄바꿈도 어차피 저장할 때 한 칸 공백으로 바뀌므로 여기서 같이 한 칸으로 맞춘다.
+    const text = rawValue.replace(/\s+/g, " ").trim();
     const current = linesRef.current.find(l => l.id === id);
     if (!current || current.text === text) return; // 변경 없으면 히스토리 저장 안 함
     setLinesWithHistory(prev => prev.map(l => l.id === id ? { ...l, text } : l));
   };
+
+  // 편집칸(EditableLine)에 매번 새 함수를 넘기면 그 칸이 괜히 다시 그려진다.
+  // 최신 처리 함수를 담아두는 상자만 고정해서 넘긴다.
+  const lineHandlersRef = useRef<LineHandlers>({ onSplitKey: handleSplitKey, onCommit: updateText });
+  lineHandlersRef.current = { onSplitKey: handleSplitKey, onCommit: updateText };
 
   const renumber = (arr: Line[]): Line[] => {
     const counts: Record<string, number> = {};
@@ -1305,9 +1336,11 @@ export default function Index() {
     setConvertProgress(resumeFrom?.progress ?? 0);
     setConvertStatus("음향 분석 중...");
     const baseOffset = resumeFrom?.startSec ?? 0;
-    // 재생 위치 표시용 시간표 — 새 변환이면 비우고, 이어하기면 기존 것에 이어붙임
-    if (!resumeFrom) segTimeMapRef.current = [];
-    localStorage.setItem("gb_convert_progress", JSON.stringify({ fileName: f.name, progress: resumeFrom?.progress ?? 0, text: initText, startSec: baseOffset }));
+    // 저장공간이 가득 차면 예외가 나는데, 그대로 두면 변환 화면이 통째로 죽는다.
+    // 이어하기는 어디까지나 보조 기능이므로 실패해도 변환 자체는 계속 진행한다.
+    try {
+      localStorage.setItem("gb_convert_progress", JSON.stringify({ fileName: f.name, progress: resumeFrom?.progress ?? 0, text: initText, startSec: baseOffset }));
+    } catch { /* 이어하기만 포기 */ }
     // 선택된 엔진+모델이 다운로드되어 있는지 확인, 없으면 사용 가능한 것으로 자동 전환
     let useEngine = engine;
     let useModel = model;
@@ -1369,12 +1402,14 @@ export default function Index() {
             const d = JSON.parse(part.slice(5).trim());
             if (d.type === "req_id") { transcribeReqIdRef.current = d.req_id; continue; }
             if (d.type === "status") setConvertStatus(d.msg);
-            else if (d.type === "segment" || d.type === "silence") {
-              collected += d.text + "\n\n"; setRawText(collected);
-              // 재생 위치 표시용 시간표에 기록 (표시 전용) — 서버가 주는 start_sec은 이미 절대시간
-              if (d.type === "segment" && d.start_sec != null) {
-                segTimeMapRef.current.push({ t: d.start_sec, text: d.text });
-              }
+            // "(침묵)" 표시는 부정확해서 화면·문서에 넣지 않는다(2026-08-06).
+            // 단, 변환 전 무음 구간을 걸러내는 서버 기능(환각 방지)은 그대로 동작한다 — 표시만 버리는 것.
+            else if (d.type === "silence") { /* 무시 */ }
+            else if (d.type === "segment") {
+              collected += d.text + "\n\n";
+              // raw textarea에서 한글 조합 중이면 지금 덮어쓰지 않고 조합 종료 후로 미룸(위 rawComposingRef 설명 참고)
+              if (rawComposingRef.current) pendingRawTextRef.current = collected;
+              else setRawText(collected);
               // 화자분리 화면을 보는 중에도 계속 변환되는 내용을 실시간으로 마지막 줄 뒤에 이어붙임
               // (raw 모드일 때는 건드리지 않음 — 그 사이 늘어난 분량은 "이어서 편집" 시 한 번에 반영됨)
               if (modeRef.current === "split") {
@@ -1392,7 +1427,9 @@ export default function Index() {
               const prog = d.progress ?? 0;
               setConvertProgress(prog); setConvertStatus(`변환 중... ${prog}%`);
               const segEndSec = d.end_sec != null ? (baseOffset + d.end_sec) : (baseOffset + (d.start_sec ?? 0));
-              localStorage.setItem("gb_convert_progress", JSON.stringify({ fileName: f.name, progress: prog, text: collected, startSec: segEndSec }));
+              try {
+                localStorage.setItem("gb_convert_progress", JSON.stringify({ fileName: f.name, progress: prog, text: collected, startSec: segEndSec }));
+              } catch { /* 저장공간 초과 등 — 이어하기만 포기하고 변환은 계속 */ }
             } else if (d.type === "cancelled") {
               transcribeReqIdRef.current = null;
               setConverting(false); setConvertStatus("");
@@ -1465,34 +1502,9 @@ export default function Index() {
   // File System Access API 지원 여부 확인
   const hasFsApi = typeof window !== "undefined" && "showSaveFilePicker" in window;
 
-  const exportTxt = async () => {
-    const body = mode === "raw" ? rawText
-      : lines.filter(l => l.text.trim()).map(l => {
-          const tag = speakerLabel(l.speaker, l.index);
-          const timeStr = showTime ? ` (${fmt(l.time)})` : "";
-          return `${tag}${timeStr} : ${l.text}`;
-        }).join("\n");
-    const blob = new Blob([body], { type: "text/plain;charset=utf-8" });
-
-    if (hasFsApi) {
-      try {
-        const handle = await (window as any).showSaveFilePicker({
-          suggestedName: baseName() + ".txt",
-          types: [{ description: "텍스트 파일", accept: { "text/plain": [".txt"] } }],
-        });
-        const writable = await handle.createWritable();
-        await writable.write(blob);
-        await writable.close();
-        return;
-      } catch (e: any) {
-        if (e?.name === "AbortError") return; // 취소
-      }
-    }
-    // fallback
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = baseName() + ".txt"; a.click();
-  };
+  // txt 저장 기능은 제거(2026-08-06). 최초 커밋부터 어떤 버튼에도 연결된 적이 없었고,
+  // 워드(.docx) 저장이 서식(내어쓰기·글꼴·줄간격)까지 담고 세션(.json)도 함께 남겨 이어서 편집이
+  // 가능하므로 txt 는 불필요하다고 판단(사용자 확인).
 
   // exportDocx·quickSave 공용: 현재 내용으로 docx Blob 생성
   const buildDocxBlob = async (fontSize: number, lineSpacing: number) => {
@@ -1503,7 +1515,8 @@ export default function Index() {
       for (const p of rawText.split(/\n+/)) {
         if (!p.trim()) continue;
         paras.push(new Paragraph({
-          spacing: { line: lineVal, lineRule: "auto" },
+          spacing: { line: lineVal, lineRule: "auto", before: 0, after: 0 },
+          run: { size: halfPt },
           children: [new TextRun({ text: p, size: halfPt })],
         }));
       }
@@ -1517,10 +1530,11 @@ export default function Index() {
         const indent = prefix.length * 115;
         paras.push(new Paragraph({
           indent: { left: indent, hanging: indent },
-          spacing: { line: lineVal, lineRule: "auto" },
+          spacing: { line: lineVal, lineRule: "auto", before: 0, after: 0 },
+          run: { size: halfPt },
           children: [
             new TextRun({ text: prefix, bold: true, color: "000000", size: halfPt }),
-            new TextRun({ text: l.text, color: "000000", size: halfPt }),
+            new TextRun({ text: l.text.replace(/\n+/g, " "), color: "000000", size: halfPt }),
           ],
         }));
       }
@@ -1593,7 +1607,9 @@ export default function Index() {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const data = JSON.parse(e.target?.result as string);
+        // 앞에 UTF-8 BOM(눈에 안 보이는 문자)이 붙어 있으면 JSON.parse 가 무조건 실패하므로 먼저 떼어낸다.
+        const raw = (e.target?.result as string).replace(/^﻿/, "");
+        const data = JSON.parse(raw);
         if (data.version !== 1) { alert("지원하지 않는 세션 파일입니다."); return; }
         setFileName(data.fileName || "");
         setRawText(data.rawText || "");
@@ -1613,7 +1629,11 @@ export default function Index() {
             localStorage.setItem("gb_hint_session_audio", "1");
           }, 600);
         }
-      } catch { alert("세션 파일을 읽을 수 없습니다."); }
+      } catch (err: any) {
+        // 원인을 함께 보여준다 — 가계도 쪽에서 같은 상황에 원인을 못 찾아 오래 헤맨 적이 있다
+        // (실제 원인은 "JSON 이 아닌 파일에 .json 확장자만 붙은 것"이었는데, 메시지가 없어 파악이 늦었다).
+        alert(`세션 파일을 읽을 수 없습니다.\n\n원인: ${err?.message || "알 수 없는 오류"}`);
+      }
     };
     reader.readAsText(f, "utf-8");
   };
@@ -1622,61 +1642,6 @@ export default function Index() {
   const progress = duration ? (current / duration) * 100 : 0;
   const visibleLines = filterSpeaker === "ALL" ? lines : lines.filter(l => l.speaker === filterSpeaker);
 
-  // 지금 재생 중인 음성 위치에 해당하는 줄·문장 — 변환 때 받은 문장별 시간표(segTimeMapRef)로
-  // 현재 시간의 문장을 찾고, 그 문장 텍스트를 담고 있는 줄에 표시(표시 전용, 편집 로직 무관).
-  // 시간표가 없으면(세션 파일로 불러온 경우 등) 엉뚱한 곳을 가리키느니 표시하지 않는다.
-  const playingInfo = (() => {
-    if (!audioUrl || lines.length === 0 || (!playing && current === 0)) return null;
-    const segs = segTimeMapRef.current;
-    if (segs.length === 0) return null;
-    let seg: { t: number; text: string } | null = null;
-    let segIdx = -1;
-    for (let i = 0; i < segs.length; i++) { if (segs[i].t <= current + 0.001) { seg = segs[i]; segIdx = i; } else break; }
-    if (!seg) return null;
-    const norm = (s: string) => s.replace(/\(\d{2}:\d{2}\)\s*/g, "").replace(/\s+/g, " ").trim();
-    const probe = norm(seg.text).slice(0, 15);
-    if (probe.length < 6) return null; // 너무 짧은 발화("네." 등)는 오매칭 위험이 커서 표시 생략
-    const hit = lines.find(l => norm(l.text).includes(probe));
-    if (!hit) return null;
-    return { lineId: hit.id, segIdx, segText: seg.text };
-  })();
-  const playingLineId = playingInfo?.lineId ?? null;
-
-  // 형광펜: 재생 중인 문장 텍스트가 화면에서 차지하는 영역(사각형들)을 읽어와 반투명 덧칠.
-  // DOM을 바꾸지 않는 읽기 전용 오버레이 — contentEditable 편집과 충돌하지 않음.
-  const [playHlRects, setPlayHlRects] = useState<{ left: number; top: number; width: number; height: number }[]>([]);
-  const playingSegKey = playingInfo ? `${playingInfo.lineId}|${playingInfo.segIdx}` : null;
-  useEffect(() => {
-    const compute = () => {
-      try {
-        if (!playingInfo) { setPlayHlRects([]); return; }
-        const el = document.querySelector<HTMLElement>(`[data-line-id="${playingInfo.lineId}"]`);
-        if (!el) { setPlayHlRects([]); return; }
-        const segBody = playingInfo.segText.replace(/^\(\d{2}:\d{2}\)\s*/, "").trim();
-        const full = el.textContent || "";
-        const idx = full.indexOf(segBody);
-        if (idx < 0 || !segBody) { setPlayHlRects([]); return; }
-        // 문자 위치 → 실제 화면 영역: 줄 안 텍스트 노드들을 순회하며 Range를 만든다
-        const range = document.createRange();
-        let pos = 0, startSet = false, endSet = false;
-        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-        let node: Node | null;
-        while ((node = walker.nextNode())) {
-          const len = node.textContent?.length ?? 0;
-          if (!startSet && idx < pos + len) { range.setStart(node, idx - pos); startSet = true; }
-          if (startSet && idx + segBody.length <= pos + len) { range.setEnd(node, idx + segBody.length - pos); endSet = true; break; }
-          pos += len;
-        }
-        if (!startSet || !endSet) { setPlayHlRects([]); return; }
-        setPlayHlRects(Array.from(range.getClientRects()).map(r => ({ left: r.left, top: r.top, width: r.width, height: r.height })));
-      } catch { setPlayHlRects([]); }
-    };
-    compute();
-    window.addEventListener("scroll", compute, true);
-    window.addEventListener("resize", compute);
-    return () => { window.removeEventListener("scroll", compute, true); window.removeEventListener("resize", compute); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playingSegKey]);
   const SPEAKER_TABS: { key: Speaker | "ALL"; label: string }[] = [
     { key: "ALL", label: "전체" }, { key: "C", label: "상" },
     { key: "P", label: "내" }, { key: "X", label: "제3자" }, { key: "E", label: "기타" },
@@ -1902,10 +1867,7 @@ export default function Index() {
                     </div>
                     <div className="space-y-1.5">
                       <Label className="flex items-center gap-1.5 text-xs"><Cpu className="w-3.5 h-3.5" /> 음성 변환 엔진 / 모델</Label>
-                      <ModelManager
-                        currentModel={model} onModelChange={setModel}
-                        currentEngine={engine} onEngineChange={setEngine}
-                      />
+                      <ModelManager currentEngine={engine} />
                       <p className="text-xs text-gray-400">GPU가 있으면 자동으로 사용합니다.</p>
                     </div>
                     <div className="flex items-center justify-between p-2.5 rounded-lg bg-gray-50">
@@ -2621,10 +2583,10 @@ export default function Index() {
           {/* 요약 모델 없음 → 다운로드 안내 */}
           {analyzeModelReady === false && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3 text-xs text-amber-800">
-              <p className="font-bold mb-1">요약 기능을 쓰려면 요약 모델(약 1.5GB) 1회 다운로드가 필요해요.</p>
+              <p className="font-bold mb-1">요약 기능을 쓰려면 요약 모델(약 {analyzeTotalMb ? (analyzeTotalMb / 1024).toFixed(1) : "2.3"}GB) 1회 다운로드가 필요해요.</p>
               <p className="mb-2 text-amber-600">빈출 단어 정리는 모델 없이도 작동합니다. 모델도 다른 프로그램처럼 이 PC에 저장될 뿐, 상담 내용은 어디로도 전송되지 않아요.</p>
               {analyzeDownloading
-                ? <span>다운로드 중... {analyzeDlMb}MB / 1452MB</span>
+                ? <span>다운로드 중... {analyzeDlMb}MB / {analyzeTotalMb ?? "?"}MB</span>
                 : <button onClick={downloadAnalyzeModel} className="px-3 py-1 rounded bg-amber-500 hover:bg-amber-600 text-white font-bold">요약 모델 다운로드</button>}
             </div>
           )}
@@ -2853,6 +2815,14 @@ export default function Index() {
               </div>
               <div className="relative flex-1 min-h-0">
                 <textarea value={rawText} onChange={e => setRawText(e.target.value)}
+                  onCompositionStart={() => { rawComposingRef.current = true; }}
+                  onCompositionEnd={() => {
+                    rawComposingRef.current = false;
+                    if (pendingRawTextRef.current !== null) {
+                      setRawText(pendingRawTextRef.current);
+                      pendingRawTextRef.current = null;
+                    }
+                  }}
                   className="w-full h-full p-5 rounded-xl border border-gray-200 bg-white leading-relaxed text-[15px] outline-none resize-none shadow-sm"
                   placeholder="파일을 선택하면 변환 결과가 이곳에 실시간으로 채워집니다…" />
                 {converting && !rawText.trim() && (
@@ -2885,58 +2855,19 @@ export default function Index() {
             </div>
           ) : (
             <div className="flex-1 overflow-y-auto p-4 min-h-0">
-              <style>{`
-                @keyframes gb-play-pulse { 0%,100% { opacity: .35; transform: scale(.85); } 50% { opacity: .8; transform: scale(1.15); } }
-              `}</style>
-              {/* 형광펜: 지금 재생 중인 문장 위에 반투명 덧칠 (읽기 전용 오버레이) */}
-              {playHlRects.map((r, i) => (
-                <div key={i} style={{
-                  position: "fixed", left: r.left - 1, top: r.top, width: r.width + 2, height: r.height,
-                  background: "rgba(253, 224, 71, 0.42)", borderRadius: 3,
-                  mixBlendMode: "multiply", pointerEvents: "none", zIndex: 30,
-                }} />
-              ))}
-              {/* 편집 커서 표식 — 두꺼운 세로 막대 + 위쪽 삼각형 (읽기 전용 오버레이) */}
-              {caretPos && (
-                <>
-                  <div style={{
-                    position: "fixed", left: caretPos.x - 1.5, top: caretPos.y - 1, zIndex: 40,
-                    width: 3, height: caretPos.h + 2, borderRadius: 2,
-                    background: "rgba(45, 122, 58, 0.85)", pointerEvents: "none",
-                  }} />
-                  <div style={{
-                    position: "fixed", left: caretPos.x - 6, top: caretPos.y - 10, zIndex: 40,
-                    width: 0, height: 0, pointerEvents: "none",
-                    borderLeft: "6px solid transparent", borderRight: "6px solid transparent",
-                    borderTop: "9px solid rgba(45, 122, 58, 0.85)",
-                  }} />
-                </>
-              )}
               <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-2 min-h-full overflow-hidden">
                 {visibleLines.map((l) => {
                   const col = speakerColor(l.speaker);
                   const tag = speakerLabel(l.speaker, l.index);
-                  const isPlayingLine = l.id === playingLineId;
                   return (
                     <div key={l.id} className="group relative flex items-start gap-2">
-                      {isPlayingLine && (
-                        <span title="지금 재생 중인 부분"
-                          className="absolute -left-4 top-3 w-2 h-2 rounded-full select-none"
-                          style={{ background: "#3a6a4a", animation: "gb-play-pulse 1.6s ease-in-out infinite" }} />
-                      )}
                       <button onClick={() => cycleSpeaker(l.id)}
                         className="shrink-0 w-12 h-7 rounded-full text-xs font-bold transition-all hover:scale-105 border mt-1"
                         style={{ background: col.bg, color: col.text, borderColor: col.border }}>
                         {tag}
                       </button>
                       <div className="flex-1 min-w-0">
-                        <div contentEditable suppressContentEditableWarning data-line-id={l.id}
-                          onKeyDown={e => handleSplitKey(e, l.id)}
-                          onBlur={e => updateText(l.id, e.currentTarget.textContent || "")}
-                          className="min-h-[1.8rem] px-3 py-1 rounded-lg leading-relaxed text-[15px] outline-none transition-colors break-words focus:ring-2 focus:ring-[#3a6a4a]/40 focus:shadow-sm"
-                          style={{ background: isPlayingLine ? col.bg : col.bg + "55", borderLeft: `3px solid ${col.border}`, wordBreak: "break-word", overflowWrap: "break-word", caretColor: "#2d7a3a" }}>
-                          {l.text}
-                        </div>
+                        <EditableLine line={l} handlersRef={lineHandlersRef} />
                       </div>
                       {showTime && (
                         <button onClick={() => seekTo(l.time)}
