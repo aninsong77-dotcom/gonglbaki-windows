@@ -643,6 +643,12 @@ export default function Index() {
   const [showTime, setShowTime] = useState(false);
   const [isMaximized, setIsMaximized] = useState(true);
   const [showExitModal, setShowExitModal] = useState(false);
+  // 빠른저장 덮어쓰기 확인 — 예전엔 window.confirm(브라우저 네이티브 팝업)을 썼는데,
+  // 이 팝업이 뜨고 닫히는 순간 크롬 엔진 내부의 한글 조합창 위치 캐시가 어긋나는 것으로
+  // 의심되어(2026-08-20, 저장 직후 좌상단 오작동 재현) 앱이 직접 그리는 모달로 교체했다.
+  const [pendingQuickSaveConfirm, setPendingQuickSaveConfirm] = useState<{ name: string; resolve: (ok: boolean) => void } | null>(null);
+  const confirmQuickSaveOverwrite = (name: string): Promise<boolean> =>
+    new Promise((resolve) => setPendingQuickSaveConfirm({ name, resolve }));
 
   // Electron 창 상태 초기화 및 구독
   useEffect(() => {
@@ -1564,7 +1570,7 @@ export default function Index() {
           suggestedName: baseName() + ".docx",
           types: [{ description: "Word 문서", accept: { "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"] } }],
         });
-      } else if (!window.confirm(`"${quickSaveHandleRef.current.name}" 파일에 저장할까요?\n(다른 내용으로 저장하려면 취소한 뒤 '문서 저장'으로 새 파일을 만드세요.)`)) {
+      } else if (!(await confirmQuickSaveOverwrite(quickSaveHandleRef.current.name))) {
         return; // 취소 — 엉뚱한 파일을 덮어쓰는 사고 방지
       }
       const writable = await quickSaveHandleRef.current.createWritable();
@@ -3034,6 +3040,33 @@ export default function Index() {
           onPrev={() => setCaseTourStep(s => Math.max(0, s - 1))}
           onClose={() => { localStorage.setItem("gb_case_tour_done", "1"); setCaseTourStep(-1); }}
         />
+      )}
+
+      {/* ── 빠른저장 덮어쓰기 확인 모달 ── */}
+      {pendingQuickSaveConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-2xl px-8 py-7 flex flex-col items-center gap-5 min-w-[320px] max-w-[420px]">
+            <div className="text-2xl">💾</div>
+            <div className="text-center">
+              <p className="font-bold text-gray-800 text-base mb-1">"{pendingQuickSaveConfirm.name}" 파일에 저장할까요?</p>
+              <p className="text-sm text-gray-500">다른 내용으로 저장하려면 취소한 뒤 '문서 저장'으로 새 파일을 만드세요.</p>
+            </div>
+            <div className="flex gap-3 mt-1">
+              <button
+                onClick={() => { pendingQuickSaveConfirm.resolve(false); setPendingQuickSaveConfirm(null); }}
+                className="px-5 py-2 rounded-lg border border-gray-300 text-gray-700 bg-gray-50 hover:bg-gray-100 font-medium text-sm"
+              >
+                취소
+              </button>
+              <button
+                onClick={() => { pendingQuickSaveConfirm.resolve(true); setPendingQuickSaveConfirm(null); }}
+                className="px-5 py-2 rounded-lg bg-[#3a6a4a] hover:bg-[#2d5a3a] text-white font-medium text-sm"
+              >
+                저장
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── 종료 확인 모달 ── */}
