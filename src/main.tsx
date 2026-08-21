@@ -93,6 +93,10 @@ import Index from "./pages/Index";
       caret: caretInfo(),
       quirks: quirksOf(el).slice(0, 6),
       devicePixelRatio: window.devicePixelRatio,
+      // 창 자체가 지금 입력을 받는 상태인가 — activeElement는 창이 초점을 잃어도
+      // "마지막으로 초점 있던 칸"을 계속 알려주므로, 이 값이 따로 있어야
+      // "칸은 맞는데 창이 초점을 잃은 경우"를 구분할 수 있다.
+      hasFocus: document.hasFocus(),
     };
   };
 
@@ -122,9 +126,81 @@ import Index from "./pages/Index";
       if (now - lastProbeAt < 1000) return;
       lastProbeAt = now;
       const c = caretInfo();
-      const bad = c.sel === "none" || c.caretRects === 0 || c.anchorAttached === false;
+      const bad = c.sel === "none" || c.caretRects === 0 || c.anchorAttached === false || !document.hasFocus();
       if (!bad) return;
       write({ ...snapshot("커서이상", el), keyKind: keyKind(e), isComposing: e.isComposing });
+    } catch { /* 무시 */ }
+  }, true);
+
+  // ── 클릭 자동 진단 (2026-08-21 추가) ───────────────────────────────
+  // 재현 방법이 확인됨: 저장 후 편집칸을 클릭해도 커서·강조 테두리가 안 보이고
+  // 타이핑도 안 되는 경우가 있다고 함. 신고 키를 누를 필요 없이 클릭할 때마다
+  // 자동으로 남겨서, "클릭이 그 칸에 도달했는지 / 초점이 실제로 잡혔는지"를
+  // 나중에 대조할 수 있게 한다. 편집 영역(줄) 클릭만 대상으로 한다.
+  window.addEventListener("mousedown", (e) => {
+    try {
+      const x = e.clientX, y = e.clientY;
+      const target = e.target as HTMLElement;
+      const underPoint = document.elementFromPoint(x, y) as HTMLElement | null;
+      // 편집 줄이거나, 편집 줄일 것으로 기대되는 자리(underPoint가 줄인데 target이 다른 경우:
+      // 눈에 안 보이는 무언가가 그 위를 덮어 클릭을 가로채는 상황을 잡기 위함)를 대상으로 한다.
+      const targetLine = target?.closest?.("[data-line-id]") as HTMLElement | null;
+      const underLine = underPoint?.closest?.("[data-line-id]") as HTMLElement | null;
+      if (!targetLine && !underLine) return; // 편집 영역과 무관한 클릭은 기록하지 않음(잡음 방지)
+
+      const before = {
+        t: new Date().toISOString(),
+        why: "클릭",
+        x, y,
+        hasFocus: document.hasFocus(),
+        // 클릭이 실제로 향한 요소와, 그 좌표에 눈으로 보이는 요소가 다르면
+        // "보이지 않는 것이 클릭을 가로채고 있다"는 뜻이다.
+        targetTag: target?.tagName, targetLineId: targetLine?.getAttribute("data-line-id") || null,
+        underTag: underPoint?.tagName, underLineId: underLine?.getAttribute("data-line-id") || null,
+        targetEqualsUnder: target === underPoint,
+        activeBefore: (document.activeElement as HTMLElement | null)?.tagName || null,
+      };
+      // 클릭 직후 브라우저가 초점 이동을 실제로 처리한 뒤(다음 프레임) 결과를 이어서 남긴다.
+      requestAnimationFrame(() => {
+        try {
+          const active = document.activeElement as HTMLElement | null;
+          const wantedLine = targetLine || underLine;
+          write({
+            ...before,
+            // 클릭한 그 줄에 정말 초점이 붙었는가 — 이게 false면 "클릭해도 안 됐다"가 코드로 확인된다.
+            focusLanded: !!wantedLine && active === wantedLine,
+            activeAfterTag: active?.tagName || null,
+            activeAfterLineId: active?.getAttribute?.("data-line-id") || null,
+            hasFocusAfter: document.hasFocus(),
+          });
+        } catch { /* 무시 */ }
+      });
+    } catch { /* 무시 */ }
+  }, true);
+
+  // ── 초점 이동 자동 진단 ───────────────────────────────────────────
+  // 편집 줄로/에서 초점이 옮겨갈 때마다 남긴다. 저장창 등이 닫힌 뒤 초점이
+  // 어디로 돌아오는지(혹은 안 돌아오는지)를 클릭 없이도 추적하기 위함.
+  window.addEventListener("focusin", (e) => {
+    try {
+      const el = e.target as HTMLElement;
+      if (!el?.hasAttribute?.("data-line-id")) return;
+      write({
+        t: new Date().toISOString(), why: "초점들어옴",
+        lineId: el.getAttribute("data-line-id"), hasFocus: document.hasFocus(),
+      });
+    } catch { /* 무시 */ }
+  }, true);
+  window.addEventListener("focusout", (e) => {
+    try {
+      const el = e.target as HTMLElement;
+      if (!el?.hasAttribute?.("data-line-id")) return;
+      write({
+        t: new Date().toISOString(), why: "초점나감",
+        lineId: el.getAttribute("data-line-id"),
+        // 어디로 나갔는지 — body 로 나가면(즉 아무 데도 안 잡히면) 유력한 신호다.
+        toTag: (e.relatedTarget as HTMLElement | null)?.tagName || null, hasFocus: document.hasFocus(),
+      });
     } catch { /* 무시 */ }
   }, true);
 
